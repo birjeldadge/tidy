@@ -16,13 +16,13 @@ and fixes the three things that make Philter annoying to run every day:
    and are never touched.
 
 Everything is whitelist-only: an item with no rule is never touched, and every
-live command has a preview twin that changes nothing.
+live command has a preview twin that sells nothing.
 
 ## Commands
 
 | Command | What it does |
 |---|---|
-| `tidysim` | Preview. Prints exactly what `tidy` would do. Changes nothing. |
+| `tidysim` | Preview. Writes rules for any item kinds that have none (so you can review them), then prints exactly what `tidy` would do. Sells nothing. |
 | `tidy` | Live. New rules for new item kinds, store top-ups at your prices, daily reprice, then Philter. |
 | `tidyclosetsim` | Preview of `tidycloset`. Writes rules for closet items that have none, then tallies. Moves nothing. |
 | `tidycloset` | Live, one-off. Empties the closet into inventory and runs the tidy pipeline. Refuses unless `tidyclosetsim` ran the same day. |
@@ -42,12 +42,14 @@ r26597 or newer.
 
 ## First run
 
-1. Run `tidysim`. With no rule file yet, it writes a starting rule for every
-   item kind in your inventory to `data/OCDdata_<yourname>.txt`, then previews
-   what a live run would do. **Nothing is sold.**
-2. Open the relay browser, then **-run script- > Philter Manager**, and look
-   through the rules. Change anything you disagree with. Keep-counts (the
-   number next to MALL or AUTO) are how many copies stay in your inventory.
+1. Run `tidysim`. It writes a starting rule for every item kind that has none
+   to `data/OCDdata_<yourname>.txt` (your existing rules, if any, are kept),
+   then previews what a live run would do. **Nothing is sold.**
+2. Open the relay browser, then **-run script- > Philter Manager**. Do not read
+   every line: KEEP rules do nothing, and AUTO rules are sub-100-meat junk. Sort
+   the MALL rules by price and look at the expensive ones. Change anything you
+   disagree with. Keep-counts (the number next to MALL or AUTO) are how many
+   copies stay in your inventory.
 3. Run `tidysim` again if you changed things, then `tidy`.
 
 `tidy` refuses to go live until `tidysim` has been run at least once.

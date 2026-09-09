@@ -1,7 +1,7 @@
 // tidy_common.ash  --  shared code for the tidy commands (KoLmafia, aftercore).
 //
 //   tidy            rules for new item kinds, store top-ups at your prices, daily reprice, then Philter (LIVE)
-//   tidysim         preview of tidy: prints what it would do, changes nothing
+//   tidysim         preview of tidy: writes rules for new item kinds (so you can review them), sells nothing
 //   tidycloset      empties the closet into inventory and runs the tidy pipeline (LIVE, one-off)
 //   tidyclosetsim   preview of tidycloset: writes rules for closet items that lack one, tallies, moves nothing
 //
@@ -48,7 +48,6 @@ record Decision {
 string DATA_NAME = my_name() + get_property("tidy_rulesSuffix");
 string RULES_FILE = "OCDdata_" + DATA_NAME + ".txt";
 string BACKUP_FILE = "OCDdata_" + DATA_NAME + ".prev.txt";
-string PREVIEW_FILE = "OCDdata_" + DATA_NAME + "_preview.txt";   // sim only: current rules + would-be rules, so Philter never asks
 string KEEP_FILE = "tidy_keep_" + my_name() + ".txt";
 
 int protect_above() {
@@ -251,7 +250,7 @@ void common_guards(string tag) {
 		print(tag + "BaleOCD_EmptyCloset was " + getvar("BaleOCD_EmptyCloset") + "; setting it to -1 so Philter never dumps the closet on its own.", "olive");
 		cli_execute("zlib BaleOCD_EmptyCloset = -1");
 	}
-	// always point Philter at the real rule file (a preview run may have moved it)
+	// always point Philter at this character's rule file
 	cli_execute("zlib BaleOCD_DataFile = " + DATA_NAME);
 }
 
@@ -360,7 +359,6 @@ void tidy_run(boolean sim) {
 
 	// ---- new item kinds
 	buffer add;
-	boolean usePreview = false;
 	int added = 0; int addMall = 0; int addAuto = 0; int addKeep = 0;
 	foreach it, n in inv {
 		if (rules contains it) continue;
@@ -371,17 +369,10 @@ void tidy_run(boolean sim) {
 		add.append(rule_line(it, d.action, d.q, "", ""));
 	}
 	if (added == 0) print(tag + "no new item kinds; rule file unchanged.", "blue");
-	else if (sim) {
-		print(tag + "would add " + added + " rules (" + addMall + " mall, " + addAuto + " autosell, " + addKeep + " keep). Preview, so not written to the real file.", "blue");
-		string text = file_to_buffer(RULES_FILE).to_string();
-		if (text.length() > 0 && !text.ends_with("\n")) text += "\n";
-		buffer prev; prev.append(text); prev.append(add.to_string());
-		if (buffer_to_file(prev, PREVIEW_FILE)) usePreview = true;
-		else print(tag + "could not write " + PREVIEW_FILE + "; Philter's preview may ask about the new items.", "red");
-	}
 	else {
 		append_rules(add);
-		print(tag + "added " + added + " rules (" + addMall + " mall, " + addAuto + " autosell, " + addKeep + " keep). Previous file saved as " + BACKUP_FILE + ".", "blue");
+		print(tag + "added " + added + " rules (" + addMall + " mall, " + addAuto + " autosell, " + addKeep + " keep) to data/" + RULES_FILE + ". Previous file saved as " + BACKUP_FILE + ".", "blue");
+		if (sim) print(tag + "the new rules are written now so you can review them: relay browser > -run script- > Philter Manager, sort by price, change what you disagree with. Nothing is sold in a preview.", "olive");
 		clear(rules);
 		file_to_map(RULES_FILE, rules);
 	}
@@ -413,9 +404,7 @@ void tidy_run(boolean sim) {
 	int meatBefore = my_meat();
 	int kindsBefore = count(get_inventory());
 	print(tag + "running Philter " + (sim ? "in simulation" : "LIVE") + "...", sim ? "olive" : "red");
-	if (usePreview) cli_execute("zlib BaleOCD_DataFile = " + DATA_NAME + "_preview");
 	cli_execute("philter");
-	if (usePreview) cli_execute("zlib BaleOCD_DataFile = " + DATA_NAME);
 	int kindsAfter = count(get_inventory());
 	cli_execute("refresh shop");
 	if (sim) set_property("tidy_previewed", "true");
