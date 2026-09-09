@@ -83,6 +83,7 @@ Set these in the gCLI with `set name = value`.
 | Preference | Default | Meaning |
 |---|---|---|
 | `tidy_protectAbove` | 10000000 | Listings priced above this are never repriced. |
+| `tidy_priceFactor` | 1.0 | Multiplies the market price when repricing. `0.99` lists 1% under it (10 meat on a 1,000-meat item, 10,000 on a 1,000,000-meat item) so you get the sale first. Floor of 100 meat still applies. |
 | `tidy_rulesSuffix` | (empty) | Testing only. Use `OCDdata_<name><suffix>.txt` instead of your real rules. |
 
 **Keep list.** Create `data/tidy_keep_<yourname>.txt` with one item per line,
@@ -94,6 +95,17 @@ from your store if you have fewer). Example:
 sea cowbell	3
 peppermint parasol	1
 ```
+
+**Pin list.** Create `data/tidy_pin_<yourname>.txt` with one item name per
+line. Those listings are never repriced, whatever their price: hand-set prices,
+or items you keep in the mall just to watch the price.
+
+**About "market price".** KoLmafia deliberately hides the true cheapest listing
+from scripts (it is anti-mallbot policy in mafia itself): the price a script can
+see is the 5th cheapest. That is what tidy uses. At factor 1.0 you sit at or
+above the cheapest sellers and never start a price war. With a factor under 1.0
+you list below that number, which may or may not undercut the real cheapest
+seller. Your call.
 
 ## Guards
 

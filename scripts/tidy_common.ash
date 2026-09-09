@@ -24,9 +24,13 @@
 //
 // Settings (KoLmafia preferences, set with: set tidy_protectAbove = 5000000):
 //   tidy_protectAbove   listings priced above this are never repriced (default 10000000)
+//   tidy_priceFactor    multiply the market price by this when repricing (default 1.0 = match market;
+//                       0.99 = list 1% under the market price to get the sale first; never below 100 meat)
 //   tidy_rulesSuffix    testing only: use OCDdata_<name><suffix>.txt instead of your real rules
 // Optional file data/tidy_keep_<name>.txt, one "item name<TAB>count" per line:
 //   those items always keep at least that many copies on hand (MALL/AUTO rules are patched).
+// Optional file data/tidy_pin_<name>.txt, one item name per line:
+//   those store listings are never repriced (hand-set prices, "keeping an eye on it" listings).
 
 since r26597;   // git checkout honours manifest.json root_directory (needed to install Philter automatically)
 
@@ -49,11 +53,32 @@ string DATA_NAME = my_name() + get_property("tidy_rulesSuffix");
 string RULES_FILE = "OCDdata_" + DATA_NAME + ".txt";
 string BACKUP_FILE = "OCDdata_" + DATA_NAME + ".prev.txt";
 string KEEP_FILE = "tidy_keep_" + my_name() + ".txt";
+string PIN_FILE = "tidy_pin_" + my_name() + ".txt";
 
 int protect_above() {
 	int p = get_property("tidy_protectAbove").to_int();
 	return p > 0 ? p : 10000000;
 }
+float price_factor() {
+	float f = get_property("tidy_priceFactor").to_float();
+	return (f > 0.0 && f <= 1.0) ? f : 1.0;
+}
+// Listings you never want repriced (data/tidy_pin_<name>.txt, one item name per line).
+boolean [item] load_pin_list() {
+	boolean [item] p;
+	string text = file_to_buffer(PIN_FILE).to_string();
+	if (text.length() == 0) return p;
+	foreach i, line in text.split_string("\n") {
+		string name = line;
+		if (name.ends_with("\r")) name = name.substring(0, name.length() - 1);
+		if (name.length() == 0 || name.starts_with("#")) continue;
+		item it = name.to_item();
+		if (it != $item[none]) p[it] = true;
+		else print("tidy: pin list line not an item, ignored: " + name, "red");
+	}
+	return p;
+}
+boolean [item] PIN_LIST = load_pin_list();
 
 int sale_price(item it) {
 	if (historical_age(it) < 1 && historical_price(it) > 0) return historical_price(it);
@@ -100,21 +125,13 @@ string rule_line(item it, string action, int q, string info, string message) {
 	return "[" + it.to_int() + "]" + it.name + "\t" + action + "\t" + q + "\t" + info + "\t" + message + "\n";
 }
 
+// The whole file is always rewritten in canonical form ([id]name, action, q, info, message):
+// Philter's loader crashes on a rule line that lost its trailing columns (editors strip trailing tabs).
 void save_rules(OCDinfo [item] rules) {
 	buffer current = file_to_buffer(RULES_FILE);
 	if (current.length() > 0) buffer_to_file(current, BACKUP_FILE);
 	buffer out;
 	foreach it, r in rules out.append(rule_line(it, r.action, r.q, r.info, r.message));
-	if (!buffer_to_file(out, RULES_FILE)) abort("tidy: failed to write " + RULES_FILE + ". Nothing sold.");
-}
-
-// Append rule lines to the rule file (keeps a .prev backup, fixes a missing trailing newline).
-void append_rules(buffer add) {
-	buffer current = file_to_buffer(RULES_FILE);
-	if (current.length() > 0) buffer_to_file(current, BACKUP_FILE);
-	string text = current.to_string();
-	if (text.length() > 0 && !text.ends_with("\n")) text += "\n";
-	buffer out; out.append(text); out.append(add.to_string());
 	if (!buffer_to_file(out, RULES_FILE)) abort("tidy: failed to write " + RULES_FILE + ". Nothing sold.");
 }
 
@@ -221,9 +238,11 @@ void reprice_store(boolean sim, string tag) {
 		return;
 	}
 	int limit = protect_above();
+	float factor = price_factor();
 	int [item] shop = get_shop();
-	int changed = 0; int same = 0; int protectedCount = 0; int noPrice = 0;
+	int changed = 0; int same = 0; int protectedCount = 0; int noPrice = 0; int pinned = 0;
 	foreach it, n in shop {
+		if (PIN_LIST contains it) { pinned += 1; continue; }
 		int cur = shop_price(it);
 		if (cur > limit) { protectedCount += 1; continue; }
 		// Live search only where it matters (listings at 10,000+); cheap listings use the daily cached price,
@@ -231,6 +250,7 @@ void reprice_store(boolean sim, string tag) {
 		int mkt = (cur >= 10000) ? mall_price(it, 0.0) : mall_price(it);
 		if (mkt <= 0) { noPrice += 1; continue; }
 		if (mkt > limit) { protectedCount += 1; continue; }
+		if (factor < 1.0) mkt = floor(mkt * factor);
 		if (mkt < 100) mkt = 100;
 		if (mkt == cur) { same += 1; continue; }
 		changed += 1;
@@ -239,7 +259,7 @@ void reprice_store(boolean sim, string tag) {
 		else print(tag + "could not reprice " + it + "; left at " + rnum(cur) + ".", "red");
 	}
 	if (!sim) set_property("_tidyRepricedToday", "true");
-	print(tag + (sim ? "would reprice " : "repriced ") + changed + " listing" + (changed == 1 ? "" : "s") + " to market; " + same + " already at market; " + protectedCount + " left alone (over " + rnum(limit) + " meat); " + noPrice + " with no market price.", "blue");
+	print(tag + (sim ? "would reprice " : "repriced ") + changed + " listing" + (changed == 1 ? "" : "s") + " to market" + (factor < 1.0 ? " x " + factor : "") + "; " + same + " already there; " + protectedCount + " left alone (over " + rnum(limit) + " meat); " + pinned + " pinned; " + noPrice + " with no market price.", "blue");
 }
 
 void common_guards(string tag) {
@@ -358,7 +378,6 @@ void tidy_run(boolean sim) {
 	boolean [item] pieces = outfit_piece_set();
 
 	// ---- new item kinds
-	buffer add;
 	int added = 0; int addMall = 0; int addAuto = 0; int addKeep = 0;
 	foreach it, n in inv {
 		if (rules contains it) continue;
@@ -366,11 +385,12 @@ void tidy_run(boolean sim) {
 		added += 1;
 		if (d.action == "MALL") addMall += 1; else if (d.action == "AUTO") addAuto += 1; else addKeep += 1;
 		print("  new: " + n + " " + it + "  ->  " + d.action + (d.q > 0 ? " keep " + d.q : "") + "   (" + d.why + ")", d.action == "KEEP" ? "green" : "black");
-		add.append(rule_line(it, d.action, d.q, "", ""));
+		OCDinfo r; r.action = d.action; r.q = d.q; r.info = ""; r.message = "";
+		rules[it] = r;
 	}
 	if (added == 0) print(tag + "no new item kinds; rule file unchanged.", "blue");
 	else {
-		append_rules(add);
+		save_rules(rules);
 		print(tag + "added " + added + " rules (" + addMall + " mall, " + addAuto + " autosell, " + addKeep + " keep) to data/" + RULES_FILE + ". Previous file saved as " + BACKUP_FILE + ".", "blue");
 		if (sim) print(tag + "the new rules are written now so you can review them: relay browser > -run script- > Philter Manager, sort by price, change what you disagree with. Nothing is sold in a preview.", "olive");
 		clear(rules);
