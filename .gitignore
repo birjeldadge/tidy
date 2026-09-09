@@ -1,0 +1,6 @@
+# per-character rule files, keep lists and previews never belong in the repo
+data/
+OCDdata_*.txt
+tidy_keep_*.txt
+*.prev.txt
+work/
