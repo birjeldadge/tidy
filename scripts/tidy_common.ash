@@ -4,7 +4,8 @@
 //                   live run would do, sells nothing
 //   tidy go         LIVE: rules for new item kinds, store top-ups at your prices, daily reprice, then Philter
 //   tidy reset      clean sweep: backs up the rule file, then the first-run preview writes fresh rules (sells nothing)
-//   tidy revert     undo the last change tidy made to the rule file (swap with the .prev copy; run again to swap back)
+//   tidy revert     undo the last change tidy made to the rule file (swap with the .prev copy; run again to swap back;
+//                   refuses a copy that holds no readable rules)
 //   tidy help       prints the commands and settings, does nothing else (so does any other word)
 //   tidycloset      PREVIEW: writes rules for closet items that lack one, tallies, moves nothing
 //   tidycloset go   LIVE, one-off: empties the closet into inventory and runs the tidy pipeline
@@ -266,6 +267,30 @@ void save_rules(OCDinfo [item] rules) {
 	buffer out;
 	foreach it, r in rules out.append(rule_line(it, r.action, r.q, r.info, r.message));
 	if (!buffer_to_file(out, RULES_FILE)) abort("tidy: failed to write " + RULES_FILE + ". Nothing sold.");
+}
+
+// Every non-comment line of the rule file must be in the parsed map, because save_rules() rewrites the whole file
+// from that map: a line file_to_map skipped (no tab in it, an item this KoLmafia does not know, the same item twice)
+// would be dropped silently on the next save and its item re-decided as "new". So stop, and say which line.
+void check_rule_file(OCDinfo [item] rules, string tag) {
+	string text = file_to_buffer(RULES_FILE).to_string();
+	int lines = 0; int noTab = 0; int unknown = 0; string first = "";
+	foreach i, raw in text.split_string("\n") {
+		string line = raw;
+		if (line.ends_with("\r")) line = line.substring(0, line.length() - 1);
+		if (line.length() == 0 || line.starts_with("#")) continue;
+		lines += 1;
+		int tab = line.index_of("\t");
+		if (tab < 0) { noTab += 1; if (first == "") first = line; continue; }
+		if (line.substring(0, tab).to_item() == $item[none]) { unknown += 1; if (first == "") first = line; }
+	}
+	int dup = lines - noTab - unknown - count(rules);
+	if (noTab == 0 && unknown == 0 && dup <= 0) return;
+	string why = "";
+	if (noTab > 0) why += noTab + " line" + (noTab == 1 ? " has" : "s have") + " no tab in " + (noTab == 1 ? "it" : "them") + " (an editor that turns tabs into spaces?); ";
+	if (unknown > 0) why += unknown + " line" + (unknown == 1 ? " names" : "s name") + " an item this KoLmafia does not know; ";
+	if (dup > 0) why += dup + " line" + (dup == 1 ? " repeats" : "s repeat") + " an item already in the file; ";
+	abort(tag + "data/" + RULES_FILE + " has " + lines + " rule lines but only " + count(rules) + " loaded: " + why + "first odd line: " + first + " -- a rewrite would drop them, so nothing was changed. Fix the file in a tab-preserving editor, update KoLmafia, or run tidy reset to start over (the old file is backed up first).");
 }
 
 // Philter's default ruleset (installed with Philter); Bale's older OCDefault.txt as fallback.
@@ -543,6 +568,7 @@ void tidy_closet_run(boolean sim) {
 	OCDinfo [item] rules;
 	if (!file_to_map(RULES_FILE, rules) || count(rules) == 0) abort(tag + "no rule file " + RULES_FILE + " yet. Run plain tidy first.");
 	if (!sim && get_property("_tidyClosetPreviewed") != "true") abort(tag + "run the preview first (plain tidycloset, no go, once per day) and look at what it will do.");
+	check_rule_file(rules, tag);
 	snapshot_rules();
 	cli_execute("refresh closet");
 	int [item] closet = get_closet();
@@ -630,6 +656,8 @@ void tidy_revert() {
 	string resetBackup = get_property("tidy_resetBackup");
 	if (resetBackup != "") {
 		buffer old = file_to_buffer(resetBackup);
+		OCDinfo [item] oldRules; file_to_map(resetBackup, oldRules);
+		if (old.length() > 0 && count(oldRules) == 0) abort(tag + "the reset backup " + resetBackup + " holds no readable rules; not restoring it. Nothing changed.");
 		if (old.length() > 0) {
 			buffer current = file_to_buffer(RULES_FILE);
 			if (!buffer_to_file(old, RULES_FILE)) abort(tag + "could not write " + RULES_FILE + ". Nothing changed.");
@@ -644,6 +672,7 @@ void tidy_revert() {
 	if (prev.length() == 0) abort(tag + "no previous version (" + BACKUP_FILE + ") to go back to. Nothing changed.");
 	buffer current = file_to_buffer(RULES_FILE);
 	OCDinfo [item] check; file_to_map(BACKUP_FILE, check);
+	if (count(check) == 0) abort(tag + BACKUP_FILE + " holds no readable rules (tabs replaced by spaces?), so it is not a version worth going back to; not restoring it. Nothing changed.");
 	if (!buffer_to_file(prev, RULES_FILE)) abort(tag + "could not write " + RULES_FILE + ". Nothing changed.");
 	buffer_to_file(current, BACKUP_FILE);
 	print(tag + RULES_FILE + " is back to its previous version (" + count(check) + " rules). Run tidy revert again to swap back. Nothing was sold.", "olive");
@@ -670,15 +699,18 @@ void tidy_dispatch(string which, string [int] args) {
 void tidy_run(boolean sim) {
 	string tag = sim ? "tidy (preview): " : "tidy: ";
 	common_guards(tag);
-	snapshot_rules();
 
 	// ---- first run: write rules, sell nothing
 	OCDinfo [item] rules;
 	if (!file_to_map(RULES_FILE, rules) || count(rules) == 0) {
-		bootstrap_rules(sim, tag);
+		bootstrap_rules(sim, tag);   // stops if the file exists but nothing in it parses, before anything is copied over .prev
 		if (!sim) return;
 		clear(rules);
 		file_to_map(RULES_FILE, rules);
+	}
+	else {
+		check_rule_file(rules, tag);   // every line must have made it into the map, or a rewrite would drop rules
+		snapshot_rules();              // only after the checks: a broken file must never overwrite the last good .prev
 	}
 	if (!sim && get_property("tidy_previewed") != "true")
 		abort(tag + "run a preview first (plain tidy, no go) and look at what it will do.");
