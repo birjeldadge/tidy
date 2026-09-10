@@ -57,11 +57,24 @@ KoLmafia silently drops arguments a `void main()` does not declare, the live
 command ran. The fix is a vararg `main(string... args)`, which mafia never
 prompts for, and a dispatcher that treats any unknown word as `help`.
 
+**Nothing sells on a rule the same run that wrote it.** A live run that meets a
+new item kind writes the generator's rule but holds everything on hand for
+`tidy_holdNewDays` (default 1). The next run releases it. So a spoofed or
+transient market price can never turn a new item into a sale before a human had
+a day to see the rule. Added after the adversarial review.
+
+**Philter's settings are verified, not assumed.** The `zlib name = value` CLI
+command silently refuses a name it has never seen, and Philter only creates its
+names on its own first run, so a fresh install could once have previewed with
+simulation off. tidy now writes through zlib's own store, reads each value back,
+and refuses to start Philter unless simulation reads back as on. Found by the
+adversarial review; nobody was hit.
+
 **Whitelist only.** Inherited from Philter. No rule, no action.
 
 **Nothing leaves the account except through the mall and autosell.** tidy makes
 no network calls of its own, uses no kmail, trade or stash functions, and turns
-inherited CLAN and GIFT rules into KEEP by default. Philter can still pulverize,
+inherited CLAN, GIFT and DISC rules into KEEP by default. Philter can still pulverize,
 use, craft, untinker or display items if a rule the owner wrote says so; tidy
 itself only ever writes KEEP, MALL, AUTO and CLST.
 
@@ -100,6 +113,13 @@ price, by design, to inhibit mallbots that snipe mispriced items. tidy uses that
 number and calls it "market". At factor 1.0 a listing sits at or above the
 cheapest sellers, so it never undercuts anyone and never starts a price war.
 
+The 5th-cheapest figure counts units, not stores, and includes your own
+listing, so one seller dumping six cheap units for an afternoon can define
+"market" for a day. Two guards limit the damage: any cut is confirmed with a
+fresh search first (the cheap-listing cache is per session, not per day), and
+no listing is cut by more than `tidy_maxCutPct` (30%) in one day, so a real
+collapse is followed over several days and a fake one costs at most one step.
+
 Defaults: reprice **down only** (`tidy_reprice = down`), never raise a price
 the owner set, never chase a market that collapsed to the 100 floor, never below
 100 meat, never touch listings above `tidy_protectAbove` (1,000,000). `both`
@@ -122,9 +142,12 @@ the rest.
 ## Clean sweep and undo
 
 Old Philter or OCD rule files carry decisions their owners no longer remember.
-`tidy reset` backs the file up with a date and runs the first-run preview;
-`tidy revert` restores that backup, or otherwise swaps in the `.prev` copy.
-Neither sells anything.
+`tidy reset` backs the file up with a date and time and runs the first-run
+preview; `tidy go` is then refused until the owner has run a plain preview and
+looked. `tidy revert` restores that backup, or otherwise swaps in the `.prev`
+copy, which every run takes once at its start so a revert undoes the whole run.
+Neither sells anything. A rule file that exists but does not parse is never
+overwritten.
 
 ## What has been tested
 
@@ -136,6 +159,15 @@ Neither sells anything.
   (7,187 kinds) whose preview and accident shaped most of the defaults above.
 - The live path (reprice, take-back, top-up, Philter live) has run once for
   real through the public script. Drip listings have been preview-tested only.
+- An adversarial review (a fresh reviewer with the repo, the KoLmafia source,
+  and the brief "look for catastrophic failure and future footguns") produced
+  six catastrophic and six recoverable findings. All twelve are fixed and each
+  fix was probed on the author's account: verified Philter settings, the
+  one-day hold on live-written rules, the per-day cut cap with a fresh search
+  before any cut, timestamped reset backups, the unparseable-file guard, DISC
+  neutralising, strict whole-number settings, run-start `.prev` snapshots, a
+  closet preview that changes nothing, drip limited to MALL rules, and a stop
+  before Philter on any failed mafia call.
 
 ## Known limits
 
