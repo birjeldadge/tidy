@@ -38,7 +38,8 @@
 //   tidy_sellConsumables false (default): potions (usable, grants an effect), food, booze, spleen items with no rule start as KEEP
 //   tidy_allowGiving    false (default): rules that say CLAN (clan stash), GIFT (kmail) or DISC (discard) are turned into KEEP every run
 //   tidy_maxCutPct      30: the most the daily reprice may cut one listing in one day, as a percent of its current price
-//   tidy_holdNewDays    1: a live run writes rules for new item kinds but holds them this many days before they can sell (0 = off)
+//   tidy_holdNewDays    1: a live run writes rules for new item kinds but holds them this many days before they can sell (0 = off).
+//                       Holds, top-ups and drip keep-counts count bag + closet + worn copies, the way Philter does.
 //   tidy_priceFactor    multiply the market price by this when repricing (default 1.0 = match market;
 //                       0.99 = list 1% under the market price to get the sale first; never below 100 meat)
 //   tidy_priceJitter    random spread around the factor (default 0). 0.01 with factor 0.99 draws a factor
@@ -429,6 +430,7 @@ void drip_step(OCDinfo [item] rules, int [item] shop, boolean sim, string tag) {
 	int listed = 0; int waiting = 0; int held = 0;
 	foreach it, spec in DRIP_LIST {
 		if (!(rules contains it) || rules[it].action != "MALL") { print("  drip: " + it + " skipped, its rule is " + ((rules contains it) ? rules[it].action : "missing") + ", not MALL", "olive"); continue; }
+		if (rules[it].message.starts_with("tidy new ")) { print("  drip: " + it + " skipped, its rule was written by a live run and is still on hold", "olive"); continue; }
 		int inStore = (shop contains it) ? shop[it] : 0;
 		if (inStore > 0) {
 			if (state contains it) remove state[it];
@@ -458,8 +460,8 @@ void drip_step(OCDinfo [item] rules, int [item] shop, boolean sim, string tag) {
 				}
 			}
 		}
-		// whatever is still on hand stays on hand: Philter must not list it
-		if ((rules contains it) && rules[it].action != "KEEP") rules[it].q = item_amount(it);
+		// whatever is still on hand stays on hand: Philter must not list it (it counts bag + closet + worn, so keep that many)
+		if ((rules contains it) && rules[it].action != "KEEP") rules[it].q = on_hand(it);
 	}
 	map_to_file(state, DRIP_STATE_FILE);
 	save_rules(rules);
@@ -719,14 +721,14 @@ void tidy_run(boolean sim) {
 	boolean [item] pieces = outfit_piece_set();
 
 	// ---- release holds: rules written by an earlier LIVE run that have waited long enough
-	int released = 0; int stillHeld = 0; int holdDays = hold_new_days();
+	int released = 0; int stillHeld = 0; int raisedHold = 0; int holdDays = hold_new_days();
 	foreach it, r in rules {
 		if (!r.message.starts_with("tidy new ")) continue;
 		string [int] f = r.message.split_string(" ");   // "tidy new <day> q<decided keep-count>"
 		int since = (count(f) > 2) ? f[2].to_int() : 0;
 		int decidedQ = (count(f) > 3) ? f[3].substring(1).to_int() : 0;
 		if (today_number() - since >= holdDays) { rules[it].q = decidedQ; rules[it].message = ""; released += 1; }
-		else stillHeld += 1;
+		else { stillHeld += 1; if (on_hand(it) > r.q) { rules[it].q = on_hand(it); raisedHold += 1; } }   // copies picked up since the rule was written are held too
 	}
 	if (released > 0) print(tag + released + " rule" + (released == 1 ? "" : "s") + " written by an earlier live run " + (released == 1 ? "is" : "are") + " past the " + holdDays + "-day hold and can sell now.", "blue");
 	if (stillHeld > 0) print(tag + stillHeld + " new-kind rule" + (stillHeld == 1 ? "" : "s") + " still on hold (written by a live run, nobody has looked yet). Review in Philter Manager; they sell after " + holdDays + " day" + (holdDays == 1 ? "" : "s") + ".", "olive");
@@ -740,14 +742,16 @@ void tidy_run(boolean sim) {
 		if (d.action == "MALL") addMall += 1; else if (d.action == "AUTO") addAuto += 1; else addKeep += 1;
 		OCDinfo r; r.action = d.action; r.q = d.q; r.info = ""; r.message = "";
 		if (!sim && holdDays > 0 && d.action != "KEEP") {
-			// a live run may write the rule, but not sell on it: hold everything on hand until the wait is over
-			r.q = n; r.message = "tidy new " + today_number() + " q" + d.q; held += 1;
+			// a live run may write the rule, but not sell on it: hold everything on hand until the wait is over.
+			// Philter measures the keep-count against bag + closet + worn copies, so the hold must count the same
+			// way; holding only the bag count would let Philter sell the bag copies when more sit in the closet.
+			r.q = on_hand(it); r.message = "tidy new " + today_number() + " q" + d.q; held += 1;
 		}
 		print("  new: " + n + " " + it + "  ->  " + d.action + (d.q > 0 ? " keep " + d.q : "") + "   (" + d.why + ")" + (r.message != "" ? "   [held " + holdDays + " day" + (holdDays == 1 ? "" : "s") + "]" : ""), d.action == "KEEP" ? "green" : "black");
 		rules[it] = r;
 	}
 	if (held > 0) print(tag + held + " new MALL/AUTO rule" + (held == 1 ? "" : "s") + " written but held: nothing sells on a rule the same run that wrote it. Run a preview or open Philter Manager to review them; they sell after " + holdDays + " day" + (holdDays == 1 ? "" : "s") + " (tidy_holdNewDays).", "olive");
-	if (released > 0 && added == 0) save_rules(rules);
+	if ((released > 0 || raisedHold > 0) && added == 0) save_rules(rules);
 	if (added == 0) print(tag + "no new item kinds; rule file unchanged.", "blue");
 	else {
 		save_rules(rules);
@@ -768,7 +772,9 @@ void tidy_run(boolean sim) {
 	foreach it, listed in shop {
 		if (DRIP_LIST contains it) continue;
 		if (!(rules contains it) || rules[it].action != "MALL") continue;
-		int excess = item_amount(it) - rules[it].q;
+		// Philter's excess is (bag + closet + worn) - keep-count, taken from the bag. Top up exactly that, or Philter
+		// finds a remainder and re-lists it at market, which KoL applies to the whole listing (your price is gone).
+		int excess = min(item_amount(it), on_hand(it) - rules[it].q);
 		if (excess <= 0) continue;
 		int price = shop_price(it);
 		if (price <= 0 || price >= 999999999) abort(tag + "could not read your store price for " + it + " (mafia returned " + price + "). Stopping before Philter so the listing cannot be repriced. Run 'refresh shop' and try again.");
