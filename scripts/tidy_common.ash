@@ -26,7 +26,7 @@
 // the mall. Review the generated rules in Philter Manager any time.
 //
 // Settings (KoLmafia preferences, set with: set tidy_protectAbove = 5000000):
-//   tidy_protectAbove   listings priced above this are never repriced (default 10000000)
+//   tidy_protectAbove   listings priced above this are never repriced (unset = 1000000; 0 = off, reprice everything)
 //   tidy_priceFactor    multiply the market price by this when repricing (default 1.0 = match market;
 //                       0.99 = list 1% under the market price to get the sale first; never below 100 meat)
 //   tidy_priceJitter    random spread around the factor (default 0). 0.01 with factor 0.99 draws a factor
@@ -64,9 +64,12 @@ string BACKUP_FILE = "OCDdata_" + DATA_NAME + ".prev.txt";
 string KEEP_FILE = "tidy_keep_" + my_name() + ".txt";
 string PIN_FILE = "tidy_pin_" + my_name() + ".txt";
 
+// Listings priced above this are never repriced. Unset = 1,000,000. 0 = off (everything gets repriced).
 int protect_above() {
-	int p = get_property("tidy_protectAbove").to_int();
-	return p > 0 ? p : 10000000;
+	string s = get_property("tidy_protectAbove");
+	if (s == "") return 1000000;
+	int p = s.to_int();
+	return p > 0 ? p : 0;
 }
 float price_factor() {
 	float f = get_property("tidy_priceFactor").to_float();
@@ -297,12 +300,12 @@ void reprice_store(boolean sim, string tag) {
 	foreach it, n in shop {
 		if (PIN_LIST contains it) { pinned += 1; continue; }
 		int cur = shop_price(it);
-		if (cur > limit) { protectedCount += 1; continue; }
+		if (limit > 0 && cur > limit) { protectedCount += 1; continue; }
 		// Live search only where it matters (listings at 10,000+); cheap listings use the daily cached price,
 		// otherwise a big store means thousands of mall searches every day.
 		int mkt = (cur >= 10000) ? mall_price(it, 0.0) : mall_price(it);
 		if (mkt <= 0) { noPrice += 1; continue; }
-		if (mkt > limit) { protectedCount += 1; continue; }
+		if (limit > 0 && mkt > limit) { protectedCount += 1; continue; }
 		// inside the allowed band already: leave it (with jitter 0 the band is a single price)
 		if (cur >= band_low(mkt) && cur <= band_high(mkt)) { same += 1; continue; }
 		int newp = target_price(mkt);
@@ -314,7 +317,7 @@ void reprice_store(boolean sim, string tag) {
 	}
 	if (!sim) set_property("_tidyRepricedToday", "true");
 	string how = (factor < 1.0 || price_jitter() > 0.0) ? " (factor " + factor + (price_jitter() > 0.0 ? " +/- " + price_jitter() : "") + ")" : "";
-	print(tag + (sim ? "would reprice " : "repriced ") + changed + " listing" + (changed == 1 ? "" : "s") + " to market" + how + "; " + same + " already there; " + protectedCount + " left alone (over " + rnum(limit) + " meat); " + pinned + " pinned; " + noPrice + " with no market price.", "blue");
+	print(tag + (sim ? "would reprice " : "repriced ") + changed + " listing" + (changed == 1 ? "" : "s") + " to market" + how + "; " + same + " already there; " + protectedCount + " left alone (" + (limit > 0 ? "over " + rnum(limit) + " meat" : "protect threshold off") + "); " + pinned + " pinned; " + noPrice + " with no market price.", "blue");
 }
 
 // Drip listings: list a fixed count only when the store holds none (and it has been empty long
@@ -459,7 +462,7 @@ void tidy_help() {
 	print("  tidycloset go    live, one-off: empties the closet into inventory and runs the tidy pipeline", "black");
 	print("  tidy help        this text (any other word does the same and nothing else)", "black");
 	print("Settings (set name = value):", "blue");
-	print("  tidy_protectAbove  " + rnum(protect_above()) + "   listings priced above this are never repriced", "black");
+	print("  tidy_protectAbove  " + (protect_above() > 0 ? rnum(protect_above()) : "off") + "   listings priced above this are never repriced (0 = off, unset = 1,000,000)", "black");
 	print("  tidy_priceFactor   " + price_factor() + "   multiply the market price when repricing (1.0 = match, 0.99 = 1% under)", "black");
 	print("  tidy_priceJitter   " + price_jitter() + "   random spread around the factor, per item per day (0 = off)", "black");
 	print("Files in data/ (all optional):", "blue");

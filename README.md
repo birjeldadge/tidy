@@ -10,7 +10,7 @@ and fixes the three things that make Philter annoying to run every day:
    anything already in your store at *your* price before Philter runs, so your
    prices stay yours.
 3. **Stale prices.** Once per KoL day, tidy sets every listing under a threshold
-   (default 10,000,000 meat) to KoLmafia's market price. That price skips the five
+   (default 1,000,000 meat, adjustable or off) to KoLmafia's market price. That price skips the five
    cheapest listings, so it never undercuts anyone and never starts a price war.
    Never below 100 meat. Listings above the threshold are your hand-set prices
    and are never touched.
@@ -87,7 +87,7 @@ Set these in the gCLI with `set name = value`.
 
 | Preference | Default | Meaning |
 |---|---|---|
-| `tidy_protectAbove` | 10000000 | Listings priced above this are never repriced. |
+| `tidy_protectAbove` | 1000000 | Listings priced above this are never repriced (your hand-set prices). Set to `0` to turn the guard off and reprice everything. |
 | `tidy_priceFactor` | 1.0 | Multiplies the market price when repricing. `0.99` lists 1% under it (10 meat on a 1,000-meat item, 10,000 on a 1,000,000-meat item) so you get the sale first. Floor of 100 meat still applies. |
 | `tidy_priceJitter` | 0 | Random spread around the factor, so your prices are not a fixed pattern a rival can read. `0.01` with factor `0.99` draws a factor between 0.98 and 1.00 per item per day. A listing already inside that band is left alone, so this does not churn your whole store daily. Never above 1.0. |
 | `tidy_rulesSuffix` | (empty) | Testing only. Use `OCDdata_<name><suffix>.txt` instead of your real rules. |
