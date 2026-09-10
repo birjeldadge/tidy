@@ -12,6 +12,8 @@ and fixes the three things that make Philter annoying to run every day:
 2. **Philter reprices your whole listing when it adds stock.** For any item
    whose rule says MALL and which is already in your store, tidy tops the
    listing up at *your* price before Philter runs, so your prices stay yours.
+   The top-up counts the way Philter counts (bag, closet and worn copies), so
+   Philter finds nothing left to move.
 3. **Stale prices.** Once per KoL day, tidy lowers any listing under a threshold
    (default 1,000,000 meat, adjustable or off) that sits above KoLmafia's market
    price. That price skips the five cheapest listings, so it never undercuts
@@ -111,9 +113,11 @@ Your edits in Philter Manager stick. Every run, tidy only:
   equipment, or keep-list item, if it is lower than what you can wear or listed;
 - **turns CLAN, GIFT and DISC rules into KEEP** while `tidy_allowGiving` is
   false, and prints each one;
-- **sets the keep-count** on drip-list items to what you have on hand;
+- **sets the keep-count** on drip-list items to what you have on hand (bag,
+  closet and worn copies);
 - **holds and later releases** rules a live run wrote for new item kinds (see
-  `tidy_holdNewDays`);
+  `tidy_holdNewDays`); while a rule is held, its keep-count is raised to cover
+  any copies picked up since;
 - on `tidycloset go` only, **turns KEEP into CLST** for items that are in the
   closet, so they go back there instead of flooding your inventory. The closet
   preview shows which ones and changes nothing.
@@ -158,7 +162,7 @@ Set these in the gCLI with `set name = value`.
 | `tidy_reprice` | down | `down`: never raises a price you set, and never chases a market that collapsed to the 100-meat floor. `both`: follows the market in either direction. `off`: never reprices. |
 | `tidy_protectAbove` | 1000000 | Listings priced above this, or whose market price is above this, are never repriced (your hand-set prices). Set to `0` to turn the guard off and reprice everything. |
 | `tidy_maxCutPct` | 30 | The most the daily reprice may cut one listing in one day, as a percent of its current price. A few cheap units dumped by someone else for an afternoon cannot drag your listing to the floor in one run; if the market really stays there, the rest of the way comes on later days. |
-| `tidy_holdNewDays` | 1 | A live run that finds a new item kind writes its rule but holds everything on hand for this many days, so nothing ever sells on a rule the same run that wrote it. Preview or open Philter Manager in the meantime; `0` turns the hold off. |
+| `tidy_holdNewDays` | 1 | A live run that finds a new item kind writes its rule but holds everything on hand (bag, closet and worn copies, counted the way Philter counts, plus anything picked up during the hold) for this many days, so nothing ever sells on a rule the same run that wrote it. Drip listings skip a held rule too. Preview or open Philter Manager in the meantime; `0` turns the hold off. |
 | `tidy_junkBelow` | off | **The lazyman rule.** Off unless you set it above 100. At `1000`, every new item kind with a mall price of 1,000 meat or less and an autosell value starts as AUTO, gear and consumables included, the way a hand pass of "autosell anything under 1k" would. Everything above it in the list ("How rules get decided") still wins: untradeables, outfit pieces and keep-list items, store and display-case items, Philter's default KEEPs, and restoratives are never touched by it. Read that list before turning this on: it is the one setting that sells gear. |
 | `tidy_sellConsumables` | false | While false, potions (anything usable that grants an effect), food, booze and spleen items with no rule start as KEEP. Set true and they follow the normal rules (floor junk autosells, the rest goes to the mall). |
 | `tidy_allowGiving` | false | While false, any CLAN, GIFT or DISC rule is turned into KEEP each run, so nothing goes to the clan stash, to another player, or into the void. |
@@ -189,9 +193,10 @@ days to stay empty before relisting (optional, default 0). tidy lists that many
 only when your store holds none of it and the empty days have passed (counted
 from the first tidy run that finds the listing empty); while any are listed it
 never adds more, whatever you hold. The rest stays in your inventory: tidy sets
-that rule's keep-count to what you have on hand every run, so Philter never
-lists it either. The fresh lot is priced at the market price times your factor
-(and jitter). Example:
+that rule's keep-count to what you have on hand (bag, closet and worn) every
+run, so Philter never lists it either. A drip item whose rule is still on hold
+(see `tidy_holdNewDays`) is not listed until the hold ends. The fresh lot is
+priced at the market price times your factor (and jitter). Example:
 
 ```
 Mr. Accessory	1	3
@@ -216,6 +221,14 @@ Philter if the simulation switch does not read back as on. Found by an
 adversarial code review; nobody was hit, because both testers had run Philter
 before.
 
+**If you installed before 2026-09-10 night, `git update` again.** The hold on
+rules written by a live run, and the store top-ups, counted only your bag,
+while Philter counts bag + closet + worn copies. So on the run that wrote a new
+rule, Philter could still sell the bag copies if more copies sat in your
+closet, and a keep-count MALL rule on an item you were wearing could have its
+listing repriced by Philter. Found by a second adversarial review of the merged
+fixes; all three counts now match Philter's.
+
 - Aftercore only (refuses in Ronin or Hardcore).
 - Refuses until Hagnk's has been emptied this ascension (`pull all`).
 - Forces Philter's `BaleOCD_EmptyCloset` to -1 so Philter never dumps your closet on its own.
@@ -223,7 +236,7 @@ before.
 - A rule file that exists but does not parse is never overwritten; tidy stops and tells you.
 - A setting that is not a whole number (`set tidy_protectAbove = off`) stops the run instead of silently becoming 0.
 - Before lowering any price it confirms with a fresh mall search, and never cuts more than `tidy_maxCutPct` in a day.
-- A rule written by a live run cannot sell in that run (`tidy_holdNewDays`).
+- A rule written by a live run cannot sell in that run (`tidy_holdNewDays`). The hold, the store top-ups and the drip keep-counts all count bag + closet + worn copies, the way Philter does.
 - If a store price cannot be read, a top-up fails, a take-back fails, or any reprice fails, tidy stops before Philter runs.
 - Drip listings only ever list items whose rule says MALL.
 

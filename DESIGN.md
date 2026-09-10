@@ -41,7 +41,8 @@ each new item rather than a blanket answer.
 6. Rules for new item kinds, using the generator below.
 7. Daily reprice of the store (see pricing).
 8. Drip listings (see below).
-9. Top-ups: for MALL rules on items already in the store, the excess goes in at
+9. Top-ups: for MALL rules on items already in the store, everything above the
+   keep-count, counted the way Philter counts (bag + closet + worn), goes in at
    your existing price, so Philter finds nothing to move for those items.
 10. Philter, in simulation for a preview or live for `tidy go`.
 
@@ -61,7 +62,10 @@ prompts for, and a dispatcher that treats any unknown word as `help`.
 new item kind writes the generator's rule but holds everything on hand for
 `tidy_holdNewDays` (default 1). The next run releases it. So a spoofed or
 transient market price can never turn a new item into a sale before a human had
-a day to see the rule. Added after the adversarial review.
+a day to see the rule. Added after the adversarial review. The hold counts what
+Philter counts, bag + closet + worn, and grows to cover copies picked up while
+it lasts; the second review found the first version counted only the bag, so
+Philter could still sell the bag copies when more sat in the closet.
 
 **Philter's settings are verified, not assumed.** The `zlib name = value` CLI
 command silently refuses a name it has never seen, and Philter only creates its
@@ -136,8 +140,8 @@ they price against you; a small lot that sells out and stays empty for a while
 looks like you dried up. `data/tidy_drip_<name>.txt` names items, a lot size,
 and an optional number of days to stay empty. tidy lists the lot only when the
 store holds none and the days have passed, never tops it up while any are
-listed, and sets the rule's keep-count to what is on hand so Philter never lists
-the rest.
+listed, and sets the rule's keep-count to what is on hand (bag + closet + worn)
+so Philter never lists the rest. A rule that is still on hold is skipped.
 
 ## Clean sweep and undo
 
@@ -168,6 +172,15 @@ overwritten.
   neutralising, strict whole-number settings, run-start `.prev` snapshots, a
   closet preview that changes nothing, drip limited to MALL rules, and a stop
   before Philter on any failed mafia call.
+- A second adversarial review of the merged fixes, same brief, graded the twelve
+  earlier findings (eight closed, four partial) and found three more catastrophic
+  cases. The first, fixed next: holds and top-ups counted only the bag while
+  Philter counts bag + closet + worn. Probed on the author's account under the
+  test suffix: a held rule's keep-count rose from 2 to 197 (2 in the bag, 195 in
+  the closet) and Philter's simulation left the item alone; a drip item on hold
+  was skipped; a top-up with one copy in the closet sent 2 instead of 1; and a
+  control rule with keep 1 on an item with 135 closet copies showed Philter
+  selling the bag copy, which is exactly what the fix guards against.
 
 ## Known limits
 
