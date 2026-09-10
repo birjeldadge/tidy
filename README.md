@@ -43,7 +43,7 @@ Typical day: `garbo; tidy go` (or whatever your farming script is, then `tidy go
 In KoLmafia's gCLI:
 
 ```
-git checkout https://github.com/birjeldadge/tidy-public
+git checkout https://github.com/birjeldadge/tidy
 ```
 
 That also installs Philter and zlib if you do not have them. Needs KoLmafia
