@@ -9,11 +9,13 @@ and fixes the three things that make Philter annoying to run every day:
 2. **Philter reprices your whole listing when it adds stock.** tidy tops up
    anything already in your store at *your* price before Philter runs, so your
    prices stay yours.
-3. **Stale prices.** Once per KoL day, tidy sets every listing under a threshold
-   (default 1,000,000 meat, adjustable or off) to KoLmafia's market price. That price skips the five
-   cheapest listings, so it never undercuts anyone and never starts a price war.
-   Never below 100 meat. Listings above the threshold are your hand-set prices
-   and are never touched.
+3. **Stale prices.** Once per KoL day, tidy lowers any listing under a threshold
+   (default 1,000,000 meat, adjustable or off) that sits above KoLmafia's market
+   price. That price skips the five cheapest listings, so it never undercuts
+   anyone and never starts a price war. It never raises a price you set, never
+   chases a market that has collapsed to the 100-meat floor, and never goes
+   below 100 meat (all adjustable, see Settings). Listings above the threshold
+   are your hand-set prices and are never touched.
 
 Everything is whitelist-only: an item with no rule is never touched, and every
 live command has a preview twin that sells nothing.
@@ -27,6 +29,8 @@ Nothing runs live without the word `go`.
 | `tidy` | Preview. Writes rules for any item kinds that have none (so you can review them), then prints exactly what a live run would do. Sells nothing. |
 | `tidy go` | Live. New rules for new item kinds, store top-ups at your prices, daily reprice, then Philter. |
 | `tidy help` | Prints the commands, your current settings, and which optional files are loaded. Does nothing else. Any other word does the same. |
+| `tidy reset` | Clean sweep. Backs up your rule file as `OCDdata_<name>.before-reset-<date>.txt`, then runs the first-run preview: a fresh rule for everything you hold, nothing sold. For people who picked up Philter years ago and cannot remember what they decided. |
+| `tidy revert` | Undo the last change tidy made to your rule file (swaps in the `.prev` copy every write leaves behind). Run it again to swap back. |
 | `tidycloset` | Preview. Writes rules for closet items that have none, then tallies. Moves nothing. |
 | `tidycloset go` | Live, one-off. Empties the closet into inventory and runs the tidy pipeline. Refuses unless the preview ran the same day. |
 
@@ -59,6 +63,17 @@ r26597 or newer.
 
 `tidy go` refuses to run until a preview has been run at least once.
 
+**Already had Philter or OCD?** Then a rule file exists that tidy did not write,
+and every old decision in it stays in force. The first run says so, with counts.
+Keep them, or `tidy reset` for a clean sweep (your old file is backed up and
+`tidy revert` undoes it).
+
+**Crimbo piles and other "hold until later" items.** A script cannot know that
+salad forks sell at a premium in December. Anything you are holding for a
+season or a price gets a KEEP rule (or stays in the closet with a CLST rule).
+Items worth `tidy_keepAbove` or more per copy start as KEEP for exactly this
+reason; cheaper seasonal stock is yours to mark.
+
 ## How rules get decided
 
 For an item with no rule yet, in this order:
@@ -66,11 +81,11 @@ For an item with no rule yet, in this order:
 - Untradeable: **KEEP**.
 - A piece of one of your saved outfits, or familiar equipment: **keep 1**, sell extras.
 - On your keep list (see below): keep that many, sell extras.
-- Already in your mall store: **MALL**, extras go to your store at your price.
+- Already in your mall store: **KEEP** (you priced it; you decide whether tidy tops it up. Change the rule to MALL and it will, at your price).
 - Also in your display case: **KEEP**.
 - Philter's default ruleset says something other than sell: **KEEP**.
 - Gear or a reusable tool: **KEEP**. Cheap duplicates (under 10,000 meat, 2 or more): keep 1, sell the rest.
-- A single copy worth 10,000 meat or more: **KEEP** (rare, decide yourself).
+- Worth `tidy_keepAbove` (default 10,000 meat) or more per copy, any count: **KEEP**. Valuable stock is yours to decide.
 - Mall price at the 100-meat floor: **AUTO** (autosell) if it has an autosell value, else KEEP.
 - Everything else: **MALL**.
 
@@ -87,7 +102,10 @@ Set these in the gCLI with `set name = value`.
 
 | Preference | Default | Meaning |
 |---|---|---|
+| `tidy_keepAbove` | 10000 | New item kinds worth this much or more per copy start as KEEP, whatever the count. `0` turns it off. |
+| `tidy_reprice` | down | `down`: never raises a price you set, and never chases a market that collapsed to the 100-meat floor. `both`: follows the market in either direction. `off`: never reprices. |
 | `tidy_protectAbove` | 1000000 | Listings priced above this are never repriced (your hand-set prices). Set to `0` to turn the guard off and reprice everything. |
+| `tidy_allowGiving` | false | While false, any CLAN or GIFT rule is turned into KEEP each run, so nothing goes to the clan stash or another player. |
 | `tidy_priceFactor` | 1.0 | Multiplies the market price when repricing. `0.99` lists 1% under it (10 meat on a 1,000-meat item, 10,000 on a 1,000,000-meat item) so you get the sale first. Floor of 100 meat still applies. |
 | `tidy_priceJitter` | 0 | Random spread around the factor, so your prices are not a fixed pattern a rival can read. `0.01` with factor `0.99` draws a factor between 0.98 and 1.00 per item per day. A listing already inside that band is left alone, so this does not churn your whole store daily. Never above 1.0. |
 | `tidy_rulesSuffix` | (empty) | Testing only. Use `OCDdata_<name><suffix>.txt` instead of your real rules. |
@@ -144,6 +162,12 @@ Nothing leaves your account except through the mall and autosell. No kmail, no
 trades, no clan stash, no chat, no buying, no network calls of its own. The only
 money-moving calls are put-in-store, reprice, take-from-store, empty-closet,
 and Philter.
+
+That promise covers old rules too. Philter's CLAN action puts items in the clan
+stash and GIFT kmails them to another player. If your rule file has any (an old
+setup often does), tidy turns them into KEEP on every run and tells you which
+ones. To let them fire, `set tidy_allowGiving = true`, then `tidy revert` to
+put the last batch back.
 
 ## Credits
 

@@ -3,6 +3,8 @@
 //   tidy            PREVIEW: writes rules for new item kinds (so you can review them), prints what a
 //                   live run would do, sells nothing
 //   tidy go         LIVE: rules for new item kinds, store top-ups at your prices, daily reprice, then Philter
+//   tidy reset      clean sweep: backs up the rule file, then the first-run preview writes fresh rules (sells nothing)
+//   tidy revert     undo the last change tidy made to the rule file (swap with the .prev copy; run again to swap back)
 //   tidy help       prints the commands and settings, does nothing else (so does any other word)
 //   tidycloset      PREVIEW: writes rules for closet items that lack one, tallies, moves nothing
 //   tidycloset go   LIVE, one-off: empties the closet into inventory and runs the tidy pipeline
@@ -15,18 +17,23 @@
 //      to the whole listing. Anything already in your store is topped up here,
 //      at the price you set, before Philter runs. Philter then finds nothing
 //      left to move for those items.
-//   3. Once per KoL day, every listing priced at or under tidy_protectAbove
-//      (default 10,000,000 meat) is set to KoLmafia's market price. That price
-//      skips the five cheapest listings, so it never undercuts anyone, and it
-//      never goes below the 100-meat floor. Listings above the threshold are
-//      your hand-set prices and are left alone. No price duels.
+//   3. Once per KoL day, any listing priced at or under tidy_protectAbove
+//      (default 1,000,000 meat) that sits above KoLmafia's market price is
+//      lowered to it. That price skips the five cheapest listings, so it never
+//      undercuts anyone. By default it never raises a price you set, never
+//      chases a market that collapsed to the 100-meat floor, and never goes
+//      below 100 meat. Listings above the threshold are your hand-set prices
+//      and are left alone. No price duels.
 //
 // Rule logic for new kinds (decide): untradeable, gear, tools, display-case items
 // and rare singles stay; floor-priced junk is autosold; everything else goes to
 // the mall. Review the generated rules in Philter Manager any time.
 //
 // Settings (KoLmafia preferences, set with: set tidy_protectAbove = 5000000):
+//   tidy_keepAbove      new item kinds priced at or above this each start as KEEP, whatever the count (unset = 10000; 0 = off)
+//   tidy_reprice        down (default: never raise a price, never chase a market that collapsed to the floor) | both | off
 //   tidy_protectAbove   listings priced above this are never repriced (unset = 1000000; 0 = off, reprice everything)
+//   tidy_allowGiving    false (default): rules that say CLAN (clan stash) or GIFT (kmail) are turned into KEEP every run
 //   tidy_priceFactor    multiply the market price by this when repricing (default 1.0 = match market;
 //                       0.99 = list 1% under the market price to get the sale first; never below 100 meat)
 //   tidy_priceJitter    random spread around the factor (default 0). 0.01 with factor 0.99 draws a factor
@@ -74,6 +81,20 @@ int protect_above() {
 float price_factor() {
 	float f = get_property("tidy_priceFactor").to_float();
 	return (f > 0.0 && f <= 1.0) ? f : 1.0;
+}
+// New item kinds priced at or above this per copy start as KEEP, whatever the count. Unset = 10,000. 0 = off.
+int keep_above() {
+	string s = get_property("tidy_keepAbove");
+	if (s == "") return 10000;
+	int p = s.to_int();
+	return p > 0 ? p : 0;
+}
+// Daily reprice mode: "down" (default: never raise a price, never chase a collapsed market to the floor),
+// "both" (move to market in either direction), "off" (never reprice).
+string reprice_mode() {
+	string m = to_lower_case(get_property("tidy_reprice"));
+	if (m == "both" || m == "off") return m;
+	return "down";
 }
 // Listings you never want repriced (data/tidy_pin_<name>.txt, one item name per line).
 boolean [item] load_pin_list() {
@@ -240,7 +261,7 @@ Decision decide(item it, int n, OCDinfo [item] bale, int [item] shop, boolean [i
 		if (n > m) return sell("MALL", m, why + ", sell extras");
 		return keep(why);
 	}
-	if (shop contains it) return sell("MALL", 0, "already in your store, extras go there at your price");
+	if (shop contains it) return keep("already in your store: yours to decide");
 	if (display_amount(it) > 0) return keep("also in display case");
 	if (bale contains it && bale[it].action != "MALL" && bale[it].action != "AUTO") return keep("default ruleset says " + bale[it].action);
 	int p = sale_price(it);
@@ -254,7 +275,8 @@ Decision decide(item it, int n, OCDinfo [item] bale, int [item] shop, boolean [i
 		return keep("gear/tool");
 	}
 	if (p <= 0) return keep("no mall price");
-	if (n == 1 && p >= 10000) return keep("single copy worth " + rnum(p));
+	int ka = keep_above();
+	if (ka > 0 && p >= ka) return keep("worth " + rnum(p) + " each: yours to decide");
 	if (p <= 100) {
 		if (autosell_price(it) >= 1) return sell("AUTO", 0, "mall at floor, autosell");
 		return keep("floor price, no autosell value");
@@ -278,6 +300,7 @@ void bootstrap_rules(boolean sim, string tag) {
 		add.append(rule_line(it, d.action, d.q, "", ""));
 	}
 	if (!buffer_to_file(add, RULES_FILE)) abort(tag + "could not write " + RULES_FILE + ".");
+	set_property("tidy_inheritedNoticed", "true");   // this file is tidy's own, no inheritance notice needed
 	print(tag + "wrote " + (nMall + nAuto + nKeep) + " rules to data/" + RULES_FILE + " (" + nMall + " mall, " + nAuto + " autosell, " + nKeep + " keep).", "blue");
 	print(tag + "Review them in the relay browser: -run script- > Philter Manager. Change anything you disagree with, run tidy again to preview, then tidy go.", "olive");
 }
@@ -293,10 +316,12 @@ void reprice_store(boolean sim, string tag) {
 		print(tag + "store already repriced today; skipping that step.", "blue");
 		return;
 	}
+	string mode = reprice_mode();
+	if (mode == "off") { print(tag + "repricing is off (tidy_reprice = off); your prices are untouched.", "blue"); return; }
 	int limit = protect_above();
 	float factor = price_factor();
 	int [item] shop = get_shop();
-	int changed = 0; int same = 0; int protectedCount = 0; int noPrice = 0; int pinned = 0;
+	int changed = 0; int same = 0; int protectedCount = 0; int noPrice = 0; int pinned = 0; int wouldRaise = 0; int atFloor = 0;
 	foreach it, n in shop {
 		if (PIN_LIST contains it) { pinned += 1; continue; }
 		int cur = shop_price(it);
@@ -308,8 +333,10 @@ void reprice_store(boolean sim, string tag) {
 		if (limit > 0 && mkt > limit) { protectedCount += 1; continue; }
 		// inside the allowed band already: leave it (with jitter 0 the band is a single price)
 		if (cur >= band_low(mkt) && cur <= band_high(mkt)) { same += 1; continue; }
+		if (mode == "down" && mkt <= 100) { atFloor += 1; continue; }   // market collapsed to the floor: not worth chasing
 		int newp = target_price(mkt);
 		if (newp == cur) { same += 1; continue; }
+		if (mode == "down" && newp > cur) { wouldRaise += 1; continue; }   // never raise a price you set
 		changed += 1;
 		if (sim) print("  would reprice " + n + " " + it + ": " + rnum(cur) + " -> " + rnum(newp), "black");
 		else if (reprice_shop(newp, shop_limit(it), it)) print("  repriced " + n + " " + it + ": " + rnum(cur) + " -> " + rnum(newp), "black");
@@ -318,6 +345,8 @@ void reprice_store(boolean sim, string tag) {
 	if (!sim) set_property("_tidyRepricedToday", "true");
 	string how = (factor < 1.0 || price_jitter() > 0.0) ? " (factor " + factor + (price_jitter() > 0.0 ? " +/- " + price_jitter() : "") + ")" : "";
 	print(tag + (sim ? "would reprice " : "repriced ") + changed + " listing" + (changed == 1 ? "" : "s") + " to market" + how + "; " + same + " already there; " + protectedCount + " left alone (" + (limit > 0 ? "over " + rnum(limit) + " meat" : "protect threshold off") + "); " + pinned + " pinned; " + noPrice + " with no market price.", "blue");
+	if (mode == "down" && (wouldRaise > 0 || atFloor > 0))
+		print(tag + wouldRaise + " below market and left there (tidy never raises your prices); " + atFloor + " with a market at the 100-meat floor, not chased. Set tidy_reprice = both to change that.", "blue");
 }
 
 // Drip listings: list a fixed count only when the store holds none (and it has been empty long
@@ -460,11 +489,16 @@ void tidy_help() {
 	print("  tidy go          live: new rules, store top-ups at your prices, daily reprice, then Philter", "black");
 	print("  tidycloset       preview: rules for closet items that lack one, then a tally; moves nothing", "black");
 	print("  tidycloset go    live, one-off: empties the closet into inventory and runs the tidy pipeline", "black");
+	print("  tidy reset       clean sweep: backs up your rule file, then writes fresh rules for everything you hold (sells nothing)", "black");
+	print("  tidy revert      undo the last change tidy made to your rule file (swaps in the .prev copy; run again to swap back)", "black");
 	print("  tidy help        this text (any other word does the same and nothing else)", "black");
 	print("Settings (set name = value):", "blue");
+	print("  tidy_keepAbove     " + (keep_above() > 0 ? rnum(keep_above()) : "off") + "   new item kinds worth this much each start as KEEP, whatever the count (0 = off)", "black");
+	print("  tidy_reprice       " + reprice_mode() + "   down = never raise, never chase a floor; both = follow market either way; off", "black");
 	print("  tidy_protectAbove  " + (protect_above() > 0 ? rnum(protect_above()) : "off") + "   listings priced above this are never repriced (0 = off, unset = 1,000,000)", "black");
 	print("  tidy_priceFactor   " + price_factor() + "   multiply the market price when repricing (1.0 = match, 0.99 = 1% under)", "black");
 	print("  tidy_priceJitter   " + price_jitter() + "   random spread around the factor, per item per day (0 = off)", "black");
+	print("  tidy_allowGiving   " + (get_property("tidy_allowGiving") == "true" ? "true" : "false") + "   false = old CLAN/GIFT rules (clan stash, kmail) are turned into KEEP", "black");
 	print("Files in data/ (all optional):", "blue");
 	print("  " + RULES_FILE + "   your rules (edit in Philter Manager)", "black");
 	print("  " + KEEP_FILE + "   item<TAB>count: always keep that many on hand   (" + count(KEEP_LIST) + " loaded)", "black");
@@ -473,10 +507,54 @@ void tidy_help() {
 	print("Rules of the road: whitelist only (no rule, no action); aftercore only; Hagnk's must be emptied; the 100-meat floor always holds.", "olive");
 }
 
-// Entry point for the argument-taking scripts. Bare = preview. "go" = live. Anything else = help.
+// Clean sweep: back the rule file up, empty it, and run the first-run preview again (nothing sold).
+void tidy_reset() {
+	string tag = "tidy reset: ";
+	buffer current = file_to_buffer(RULES_FILE);
+	if (current.length() == 0) { print(tag + "no rule file " + RULES_FILE + " to reset; plain tidy will write a fresh one.", "olive"); tidy_run(true); return; }
+	string backupName = "OCDdata_" + DATA_NAME + ".before-reset-" + today_to_string() + ".txt";
+	if (!buffer_to_file(current, backupName)) abort(tag + "could not write the backup " + backupName + ". Nothing changed.");
+	buffer empty;
+	if (!buffer_to_file(empty, RULES_FILE)) abort(tag + "could not clear " + RULES_FILE + ". Your old rules are still in place (backup at " + backupName + ").");
+	set_property("tidy_resetBackup", backupName);   // "tidy revert" restores this first
+	print(tag + "old rules saved as data/" + backupName + ". Undo with: tidy revert.", "olive");
+	tidy_run(true);
+}
+
+// Undo: after a reset, restore the dated backup; otherwise swap the rule file with its .prev copy
+// (the version before tidy's last write; run again to swap back).
+void tidy_revert() {
+	string tag = "tidy revert: ";
+	string resetBackup = get_property("tidy_resetBackup");
+	if (resetBackup != "") {
+		buffer old = file_to_buffer(resetBackup);
+		if (old.length() > 0) {
+			buffer current = file_to_buffer(RULES_FILE);
+			if (!buffer_to_file(old, RULES_FILE)) abort(tag + "could not write " + RULES_FILE + ". Nothing changed.");
+			buffer_to_file(current, BACKUP_FILE);
+			set_property("tidy_resetBackup", "");
+			OCDinfo [item] check; file_to_map(RULES_FILE, check);
+			print(tag + "the reset is undone: " + RULES_FILE + " is back to the " + count(check) + " rules saved in " + resetBackup + ". Nothing was sold.", "olive");
+			return;
+		}
+	}
+	buffer prev = file_to_buffer(BACKUP_FILE);
+	if (prev.length() == 0) abort(tag + "no previous version (" + BACKUP_FILE + ") to go back to. Nothing changed.");
+	buffer current = file_to_buffer(RULES_FILE);
+	OCDinfo [item] check; file_to_map(BACKUP_FILE, check);
+	if (!buffer_to_file(prev, RULES_FILE)) abort(tag + "could not write " + RULES_FILE + ". Nothing changed.");
+	buffer_to_file(current, BACKUP_FILE);
+	print(tag + RULES_FILE + " is back to its previous version (" + count(check) + " rules). Run tidy revert again to swap back. Nothing was sold.", "olive");
+	set_property("tidy_inheritedNoticed", "true");
+}
+
+// Entry point for the argument-taking scripts. Bare = preview. "go" = live. "reset" = clean sweep. Anything else = help.
 void tidy_dispatch(string which, string [int] args) {
 	string a = (count(args) > 0) ? to_lower_case(args[0]) : "";
-	if (count(args) > 1 || (a != "" && a != "go")) { tidy_help(); return; }
+	if (count(args) > 1) { tidy_help(); return; }
+	if (a == "reset" && which == "tidy") { tidy_reset(); return; }
+	if (a == "revert" && which == "tidy") { tidy_revert(); return; }
+	if (a != "" && a != "go") { tidy_help(); return; }
 	boolean sim = (a != "go");
 	if (which == "closet") tidy_closet_run(sim);
 	else tidy_run(sim);
@@ -496,6 +574,36 @@ void tidy_run(boolean sim) {
 	}
 	if (!sim && get_property("tidy_previewed") != "true")
 		abort(tag + "run a preview first (plain tidy, no go) and look at what it will do.");
+
+	// ---- a rule file tidy did not write (old Philter / OCD decisions): say so, once
+	if (get_property("tidy_inheritedNoticed") != "true") {
+		int acting = 0; int held = 0; int [string] other;
+		foreach it, r in rules {
+			if (r.action == "MALL" || r.action == "AUTO") acting += 1;
+			else if (r.action != "KEEP" && r.action != "CLST") other[r.action] += 1;
+			if (item_amount(it) + closet_amount(it) + shop_amount(it) + display_amount(it) + equipped_amount(it) > 0) held += 1;
+		}
+		print(tag + "found an existing rule file, data/" + RULES_FILE + ", that tidy did not write: " + count(rules) + " rules from an earlier Philter or OCD setup, " + acting + " of them sell (MALL/AUTO), " + held + " cover items you hold right now.", "olive");
+		foreach a, c in other print("  " + c + (c == 1 ? " rule says " : " rules say ") + a + (a == "CLAN" ? " (put in the clan stash)" : a == "GIFT" ? " (kmail to another player)" : a == "PULV" ? " (pulverize)" : a == "DISP" ? " (display case)" : a == "MAKE" ? " (craft into something)" : a == "USE" ? " (use it)" : a == "UNTN" ? " (untinker)" : a == "BREAK" ? " (break apart)" : ""), "olive");
+		print(tag + "those old decisions stay in force unless you change them. To start clean instead: tidy reset (backs the file up, then writes fresh rules for everything you hold, sells nothing).", "olive");
+		set_property("tidy_inheritedNoticed", "true");
+	}
+
+	// ---- nothing leaves your account except through the mall and autosell: CLAN and GIFT rules become KEEP
+	if (get_property("tidy_allowGiving") != "true") {
+		int neutralized = 0;
+		foreach it, r in rules {
+			if (r.action != "CLAN" && r.action != "GIFT") continue;
+			print("  " + it + ": " + r.action + (r.action == "GIFT" && r.info != "" ? " to " + r.info : "") + " -> KEEP", "olive");
+			rules[it].message = "was " + r.action + (r.info != "" ? " " + r.info : "");
+			rules[it].action = "KEEP"; rules[it].q = 0; rules[it].info = "";
+			neutralized += 1;
+		}
+		if (neutralized > 0) {
+			save_rules(rules);
+			print(tag + "turned " + neutralized + " CLAN/GIFT rule" + (neutralized == 1 ? "" : "s") + " into KEEP: tidy never puts items in the clan stash or kmails them away. To allow it, set tidy_allowGiving = true, then tidy revert.", "olive");
+		}
+	}
 
 	// ---- load rules + defaults
 	OCDinfo [item] bale = load_defaults();
