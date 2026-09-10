@@ -142,9 +142,17 @@ no listing is cut by more than `tidy_maxCutPct` (30%) in one day, so a real
 collapse is followed over several days and a fake one costs at most one step.
 
 Defaults: reprice **down only** (`tidy_reprice = down`), never raise a price
-the owner set, never chase a market that collapsed to the 100 floor, never below
-100 meat, never touch listings above `tidy_protectAbove` (1,000,000). `both`
-follows the market either way; `off` skips repricing. `tidy_priceFactor` under
+the owner set, never chase a market that collapsed to KoL's floor (100 meat or
+twice the autosell value, whichever is higher; a price under it is a daily
+no-op), never below that floor or below the rule's own minimum price (Philter
+Manager's minimum column), never touch listings above `tidy_protectAbove`
+(1,000,000) or parked at 999,999,999+. `both` follows the market either way,
+under the same daily cap and with a fresh search before any change; `off`
+skips repricing. A preview uses the session's cached prices so repeated
+previews do not hammer the mall; the live run searches fresh. The reprice day
+lives in `data/tidy_state_<name>.txt`, written before the first change: a
+preference would be per mafia install, and two installs on one synced data
+folder (a real layout) would each cut once. `tidy_priceFactor` under
 1.0 lists under market for people who want the sale first, but only for a
 listing that sits above market: the market figure counts your own units, so
 when you are the cheapest seller it is your own price, and the second review
@@ -253,6 +261,12 @@ into a live run.
   the test suffix was refused; a run that stopped early left Philter's data-file
   setting on the real name and a completed suffixed preview put it back; `tidy
   help` ran with a broken setting and said so.
+- The pricing items, probed in `both` mode with the protect threshold at 2,000
+  meat and factor 1.0: a listing given a minimum price of 130 in the rule file
+  was cut to 130 instead of to the 126 market; a drip lot was priced at its
+  rule's 5,000 minimum; every raise and every cut in the preview stayed inside
+  the 30% daily cap, and the seven listings parked at 999,999,999 were skipped. The reprice-day file and the parked-listing exemption are
+  live-path code, verified by reading.
 
 ## Known limits
 

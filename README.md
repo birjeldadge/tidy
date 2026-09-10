@@ -16,13 +16,16 @@ and fixes the three things that make Philter annoying to run every day:
    you or by any familiar in your terrarium). If Philter would fetch copies off
    your familiars to sell them, tidy fetches them first and lists them at your
    price, so Philter finds nothing left to move.
-3. **Stale prices.** Once per KoL day, tidy lowers any listing under a threshold
+3. **Stale prices.** Once a day, tidy lowers any listing under a threshold
    (default 1,000,000 meat, adjustable or off) that sits above KoLmafia's market
-   price. That price skips the five cheapest listings, so it never undercuts
-   anyone and never starts a price war. It never raises a price you set, never
-   chases a market that has collapsed to the 100-meat floor, and never goes
-   below 100 meat (all adjustable, see Settings). Listings above the threshold
-   are your hand-set prices and are never touched.
+   price. That price is the 5th-cheapest unit on the market (counting stores'
+   per-buyer limits), so it sits at or above the cheapest sellers and never
+   starts a price war. It never raises a price you set, never chases a market
+   that has collapsed to KoL's floor (100 meat, or twice the autosell value),
+   never goes below that floor or below the minimum price on the rule, and
+   never moves a listing more than 30% in a day (all adjustable, see Settings).
+   Listings above the threshold, or parked at 999,999,999 meat or more, are
+   your hand-set prices and are never touched.
 
 Everything is whitelist-only: an item with no rule is never touched, and every
 live command has a preview twin that sells nothing.
@@ -164,14 +167,14 @@ Set these in the gCLI with `set name = value`.
 | Preference | Default | Meaning |
 |---|---|---|
 | `tidy_keepAbove` | 10000 | New item kinds worth this much or more per copy start as KEEP, whatever the count. `0` turns it off. |
-| `tidy_reprice` | down | `down`: never raises a price you set, and never chases a market that collapsed to the 100-meat floor. `both`: follows the market in either direction. `off`: never reprices. |
-| `tidy_protectAbove` | 1000000 | Listings priced above this, or whose market price is above this, are never repriced (your hand-set prices). Set to `0` to turn the guard off and reprice everything. |
+| `tidy_reprice` | down | `down`: never raises a price you set, and never chases a market that collapsed to the 100-meat floor. `both`: follows the market in either direction, with the same daily cap and a fresh search before any change. `off`: never reprices. |
+| `tidy_protectAbove` | 1000000 | Listings priced above this, or whose market price is above this, are never repriced (your hand-set prices). Set to `0` to turn the guard off and reprice everything. Listings parked at 999,999,999 or more are left alone either way. |
 | `tidy_maxCutPct` | 30 | The most the daily reprice may cut one listing in one day, as a percent of its current price. A few cheap units dumped by someone else for an afternoon cannot drag your listing to the floor in one run; if the market really stays there, the rest of the way comes on later days. |
 | `tidy_holdNewDays` | 1 | A live run that finds a new item kind writes its rule but holds everything on hand (bag, closet and worn copies, counted the way Philter counts, plus anything picked up during the hold) for this many days, so nothing ever sells on a rule the same run that wrote it. The hold is also released only after a preview has run to the end on a later day than the rule was written: the preview lists every held rule with what would sell, and that is the look. A chained `garbo; tidy go` with nobody previewing keeps the hold. Drip listings skip a held rule too. `0` turns the hold off. |
 | `tidy_junkBelow` | off | **The lazyman rule.** Off unless you set it above 100. At `1000`, every new item kind with a mall price of 1,000 meat or less and an autosell value starts as AUTO, gear and consumables included, the way a hand pass of "autosell anything under 1k" would. Everything above it in the list ("How rules get decided") still wins: untradeables, outfit pieces and keep-list items, store and display-case items, Philter's default KEEPs, and restoratives are never touched by it. Read that list before turning this on: it is the one setting that sells gear. |
 | `tidy_sellConsumables` | false | While false, potions (anything usable that grants an effect), food, booze and spleen items with no rule start as KEEP. Set true and they follow the normal rules (floor junk autosells, the rest goes to the mall). |
 | `tidy_allowGiving` | false | While false, any CLAN, GIFT or DISC rule is turned into KEEP each run, so nothing goes to the clan stash, to another player, or into the void. |
-| `tidy_priceFactor` | 1.0 | Multiplies the market price when repricing and when pricing a fresh drip lot. `0.99` lists 1% under it (10 meat on a 1,000-meat item, 10,000 on a 1,000,000-meat item) so you get the sale first. Floor of 100 meat still applies. Only a listing above market is cut; one already at or under market is left alone, because the market figure counts your own units and cutting there would chase your own price down 1% a day. |
+| `tidy_priceFactor` | 1.0 | Multiplies the market price when repricing and when pricing a fresh drip lot. `0.99` lists 1% under it (10 meat on a 1,000-meat item, 10,000 on a 1,000,000-meat item) so you get the sale first. KoL's floor and the rule's minimum price still apply. Only a listing above market is cut; one already at or under market is left alone, because the market figure counts your own units and cutting there would chase your own price down 1% a day. |
 | `tidy_priceJitter` | 0 | Random spread around the factor, so your prices are not a fixed pattern a rival can read. `0.01` with factor `0.99` draws a factor between 0.98 and 1.00 per item per day. A listing already inside that band is left alone, so this does not churn your whole store daily. Never above 1.0. |
 | `tidy_rulesSuffix` | (empty) | Testing only. Use `OCDdata_<name><suffix>.txt` (and the matching keep, pin and drip files) instead of your real ones. Live runs are refused while it is set. |
 
@@ -201,7 +204,8 @@ never adds more, whatever you hold. The rest stays in your inventory: tidy sets
 that rule's keep-count to what you have on hand (bag, closet and worn) every
 run, so Philter never lists it either. A drip item whose rule is still on hold
 (see `tidy_holdNewDays`) is not listed until the hold ends. The fresh lot is
-priced at the market price times your factor (and jitter). Example:
+priced at the market price times your factor (and jitter), never below the
+rule's minimum price. Example:
 
 ```
 Mr. Accessory	1	3
@@ -210,7 +214,9 @@ pocket wish	5
 
 **About "market price".** KoLmafia deliberately hides the true cheapest listing
 from scripts (it is anti-mallbot policy in mafia itself): the price a script can
-see is the 5th cheapest. That is what tidy uses. At factor 1.0 you sit at or
+see is the 5th-cheapest unit, counting per-buyer limits. That is what tidy
+uses. A preview works from the session's cached prices (one search per item
+per session); the live run searches fresh before it changes anything. At factor 1.0 you sit at or
 above the cheapest sellers and never start a price war. With a factor under 1.0
 you list below that number, which may or may not undercut the real cheapest
 seller. Your call. It only ever applies to a listing that sits above market:
@@ -256,7 +262,11 @@ same evening: `.prev` is taken on the first write of a run instead of at the
 start, so a run that changes nothing no longer moves the undo point; a
 keep-count or minimum price that is not a plain number stops the run instead
 of being rewritten as 0; live runs are refused under the test suffix; `tidy
-help` no longer stops on a broken setting.
+help` no longer stops on a broken setting; the reprice honours a rule's own
+minimum price, caps raises in `both` mode the way it caps cuts, treats KoL's
+real floor (twice the autosell value) as the floor, leaves parked listings
+alone, and records its day in a file next to the rules so a run that stops
+halfway, or a second mafia install on the same folder, cannot cut twice.
 
 - Aftercore only (refuses in Ronin or Hardcore).
 - Refuses until Hagnk's has been emptied this ascension (`pull all`).
@@ -268,7 +278,7 @@ help` no longer stops on a broken setting.
 - `tidy revert` refuses to restore a copy that holds no readable rules.
 - A setting that is not a plain whole number (`off`, `-1`, `1,000`, more than 15 digits) stops the run instead of silently becoming 0 and switching a guard off.
 - A preview only counts as a preview if Philter's simulation ran to the end.
-- Before lowering any price it confirms with a fresh mall search, and never cuts more than `tidy_maxCutPct` in a day.
+- Before changing any price, in either direction, the live run confirms with a fresh mall search, and never moves a listing more than `tidy_maxCutPct` in a day. A MALL rule's own minimum price (the fourth column, set in Philter Manager) is never undercut, by the reprice or by a drip lot. The reprice day is written to `data/tidy_state_<name>.txt` before the first change, so a run that stops halfway cannot cut a listing twice, and neither can two mafia installs sharing one data folder.
 - A listing already at or under market is never cut, whatever the price factor.
 - A rule written by a live run cannot sell in that run, and cannot sell until a preview has run on a later day and listed it with what would sell (`tidy_holdNewDays`). The hold, the store top-ups and the drip keep-counts all count bag + closet + worn copies, the way Philter does. "Worn" includes equipment on every familiar in your terrarium, which Philter counts and will take off them.
 - tidy takes a familiar item off a familiar only when a rule you wrote tells Philter to sell copies beyond the keep-count, and only so those copies list at your price; Philter would have taken them anyway. A preview sells nothing, but Philter's own simulation can move such copies into your bag (see DESIGN.md, known limits).
