@@ -32,7 +32,7 @@ Nothing runs live without the word `go`.
 | `tidy` (or `tidy sim`) | Preview. Writes rules for any inventory item kinds that have none (so you can review them), then prints exactly what a live run would do. Sells nothing. |
 | `tidy go` | Live. Rules for new item kinds, keep-count check, daily reprice, drip listings, store top-ups at your prices, then Philter. Refuses until a preview has been run at least once. |
 | `tidy help` | Prints the commands, your current settings, and which optional files are loaded. Does nothing else. Any other word does the same, after naming the word it did not understand. |
-| `tidy reset` | Clean sweep. Backs up your rule file as `OCDdata_<name>.before-reset-<date>.txt`, then runs the first-run preview: a fresh rule for every item kind in your inventory, nothing sold. For people who picked up Philter years ago and cannot remember what they decided. |
+| `tidy reset` | Clean sweep. Backs up your rule file as `OCDdata_<name>.before-reset-<date>-<time>.txt`, then runs the first-run preview: a fresh rule for every item kind in your inventory, nothing sold. `tidy go` is refused until you have run a plain `tidy` and looked. For people who picked up Philter years ago and cannot remember what they decided. |
 | `tidy revert` | Undo. Right after a reset it restores the dated backup. Otherwise it swaps in the `.prev` copy that every rule-file write leaves behind; run it again to swap back. Never sells anything. |
 | `tidycloset` | Preview. Writes rules for closet items that have none, then tallies. Moves nothing. |
 | `tidycloset go` | Live, one-off. Empties the closet into inventory and runs the tidy pipeline. Refuses unless the preview ran the same day. |
@@ -109,17 +109,21 @@ Your edits in Philter Manager stick. Every run, tidy only:
 - **adds** a rule for each item kind that has none (using the list above);
 - **raises the keep-count** on a MALL or AUTO rule for an outfit piece, familiar
   equipment, or keep-list item, if it is lower than what you can wear or listed;
-- **turns CLAN and GIFT rules into KEEP** while `tidy_allowGiving` is false, and
-  prints each one;
+- **turns CLAN, GIFT and DISC rules into KEEP** while `tidy_allowGiving` is
+  false, and prints each one;
 - **sets the keep-count** on drip-list items to what you have on hand;
-- in the closet preview only, **turns KEEP into CLST** for items that are in the
-  closet, so they go back there instead of flooding your inventory.
+- **holds and later releases** rules a live run wrote for new item kinds (see
+  `tidy_holdNewDays`);
+- on `tidycloset go` only, **turns KEEP into CLST** for items that are in the
+  closet, so they go back there instead of flooding your inventory. The closet
+  preview shows which ones and changes nothing.
 
 It never changes the action you chose on any other rule. Sort by price in
 Philter Manager, set PULV, AUTO, MALL or KEEP however you like, and `tidy go`
 will honour it every day after. The whole file is rewritten in a clean
 five-column form on each save (some editors strip trailing tabs, which crashes
-Philter's loader), and the previous version is kept as `.prev`.
+Philter's loader). A copy of the file as it was at the start of the run is kept
+as `.prev`, so `tidy revert` undoes the whole run.
 
 ## The lazyman rule (`tidy_junkBelow`), explained fully
 
@@ -153,9 +157,11 @@ Set these in the gCLI with `set name = value`.
 | `tidy_keepAbove` | 10000 | New item kinds worth this much or more per copy start as KEEP, whatever the count. `0` turns it off. |
 | `tidy_reprice` | down | `down`: never raises a price you set, and never chases a market that collapsed to the 100-meat floor. `both`: follows the market in either direction. `off`: never reprices. |
 | `tidy_protectAbove` | 1000000 | Listings priced above this, or whose market price is above this, are never repriced (your hand-set prices). Set to `0` to turn the guard off and reprice everything. |
+| `tidy_maxCutPct` | 30 | The most the daily reprice may cut one listing in one day, as a percent of its current price. A few cheap units dumped by someone else for an afternoon cannot drag your listing to the floor in one run; if the market really stays there, the rest of the way comes on later days. |
+| `tidy_holdNewDays` | 1 | A live run that finds a new item kind writes its rule but holds everything on hand for this many days, so nothing ever sells on a rule the same run that wrote it. Preview or open Philter Manager in the meantime; `0` turns the hold off. |
 | `tidy_junkBelow` | off | **The lazyman rule.** Off unless you set it above 100. At `1000`, every new item kind with a mall price of 1,000 meat or less and an autosell value starts as AUTO, gear and consumables included, the way a hand pass of "autosell anything under 1k" would. Everything above it in the list ("How rules get decided") still wins: untradeables, outfit pieces and keep-list items, store and display-case items, Philter's default KEEPs, and restoratives are never touched by it. Read that list before turning this on: it is the one setting that sells gear. |
 | `tidy_sellConsumables` | false | While false, potions (anything usable that grants an effect), food, booze and spleen items with no rule start as KEEP. Set true and they follow the normal rules (floor junk autosells, the rest goes to the mall). |
-| `tidy_allowGiving` | false | While false, any CLAN or GIFT rule is turned into KEEP each run, so nothing goes to the clan stash or another player. |
+| `tidy_allowGiving` | false | While false, any CLAN, GIFT or DISC rule is turned into KEEP each run, so nothing goes to the clan stash, to another player, or into the void. |
 | `tidy_priceFactor` | 1.0 | Multiplies the market price when repricing and when pricing a fresh drip lot. `0.99` lists 1% under it (10 meat on a 1,000-meat item, 10,000 on a 1,000,000-meat item) so you get the sale first. Floor of 100 meat still applies. |
 | `tidy_priceJitter` | 0 | Random spread around the factor, so your prices are not a fixed pattern a rival can read. `0.01` with factor `0.99` draws a factor between 0.98 and 1.00 per item per day. A listing already inside that band is left alone, so this does not churn your whole store daily. Never above 1.0. |
 | `tidy_rulesSuffix` | (empty) | Testing only. Use `OCDdata_<name><suffix>.txt` instead of your real rules. |
@@ -213,8 +219,13 @@ before.
 - Aftercore only (refuses in Ronin or Hardcore).
 - Refuses until Hagnk's has been emptied this ascension (`pull all`).
 - Forces Philter's `BaleOCD_EmptyCloset` to -1 so Philter never dumps your closet on its own.
-- Every rule-file write keeps the previous version as `OCDdata_<name>.prev.txt`.
-- If a store price cannot be read or a top-up fails, tidy stops before Philter runs.
+- Every run first copies your rule file to `OCDdata_<name>.prev.txt`.
+- A rule file that exists but does not parse is never overwritten; tidy stops and tells you.
+- A setting that is not a whole number (`set tidy_protectAbove = off`) stops the run instead of silently becoming 0.
+- Before lowering any price it confirms with a fresh mall search, and never cuts more than `tidy_maxCutPct` in a day.
+- A rule written by a live run cannot sell in that run (`tidy_holdNewDays`).
+- If a store price cannot be read, a top-up fails, a take-back fails, or any reprice fails, tidy stops before Philter runs.
+- Drip listings only ever list items whose rule says MALL.
 
 ## What it never does
 
@@ -226,9 +237,9 @@ Philter will also pulverize, use, craft, untinker or display items if a rule
 you wrote yourself says so.
 
 That promise covers old rules too. Philter's CLAN action puts items in the clan
-stash and GIFT kmails them to another player. If your rule file has any (an old
-setup often does), tidy turns them into KEEP on every run and tells you which
-ones. To let them fire, `set tidy_allowGiving = true`, then `tidy revert` to
+stash, GIFT kmails them to another player, and DISC discards them. If your rule
+file has any (an old setup often does), tidy turns them into KEEP on every run
+and tells you which ones. To let them fire, `set tidy_allowGiving = true`, then `tidy revert` to
 put the last batch back.
 
 ## Credits
