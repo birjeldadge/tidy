@@ -4,8 +4,11 @@ One-command inventory cleanup for Kingdom of Loathing, run from KoLmafia after
 a farming session. It sits on top of [Philter](https://github.com/Loathing-Associates-Scripting-Society/philter)
 and fixes the three things that make Philter annoying to run every day:
 
-1. **Philter stops and asks about every item it has no rule for.** tidy writes a
-   sensible rule first (see "How rules get decided"), so Philter never has to ask.
+1. **Philter finds items with no rule and asks whether to continue.** That is
+   one prompt per run, and it means someone has to be at the keyboard, and the
+   new items stay unsorted until you sit down with the manager. tidy proposes a
+   rule for each new item kind first (see "How rules get decided"), so the run
+   is unattended and the new items are already sorted when you look.
 2. **Philter reprices your whole listing when it adds stock.** For any item
    whose rule says MALL and which is already in your store, tidy tops the
    listing up at *your* price before Philter runs, so your prices stay yours.

@@ -10,14 +10,22 @@ turning a post-farming inventory into meat: a per-item rule file, a relay manage
 to edit it, and a whitelist model where an item with no rule is never touched.
 Running it every day has three frictions:
 
-1. It stops and asks about every item it has no rule for. After a day of garbo
-   that is dozens of new item kinds, and the question is modal.
+1. When it finds items with no rule it stops and asks whether to continue: one
+   modal prompt per run, so it cannot be chained unattended after a farming
+   script, and the new item kinds stay unsorted until you open the manager.
+   Philter's base rule sets cover most of the initial setup; they do not cover
+   what you picked up today.
 2. When it adds stock to a listing you already have, KoL applies Philter's price
    to the whole listing, so a hand-set price gets overwritten.
 3. Prices go stale. Nothing reprices what is already in your store.
 
 tidy is a thin ASH wrapper that removes those three frictions and adds a safety
 model on top. It is not a replacement for Philter; Philter still does every sale.
+To be fair to the alternatives: Philter's `BaleOCD_MallDangerously` setting
+removes the prompt by malling every uncategorized item, which is the opposite
+of conservative, and a one-line Philter patch could remove the prompt by
+keeping them instead. tidy's difference is that it proposes a reviewed rule for
+each new item rather than a blanket answer.
 
 ## What a run does, in order
 
