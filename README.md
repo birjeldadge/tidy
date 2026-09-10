@@ -99,6 +99,48 @@ Existing KEEP rules on closet items are converted the same way so the closet
 does not flood your inventory. Review the rules in Philter Manager before
 running `tidycloset`.
 
+## What tidy changes in your rule file, and what it never touches
+
+Your edits in Philter Manager stick. Every run, tidy only:
+
+- **adds** a rule for each item kind that has none (using the list above);
+- **raises the keep-count** on a MALL or AUTO rule for an outfit piece, familiar
+  equipment, or keep-list item, if it is lower than what you can wear or listed;
+- **turns CLAN and GIFT rules into KEEP** while `tidy_allowGiving` is false, and
+  prints each one;
+- **sets the keep-count** on drip-list items to what you have on hand;
+- in the closet preview only, **turns KEEP into CLST** for items that are in the
+  closet, so they go back there instead of flooding your inventory.
+
+It never changes the action you chose on any other rule. Sort by price in
+Philter Manager, set PULV, AUTO, MALL or KEEP however you like, and `tidy go`
+will honour it every day after. The whole file is rewritten in a clean
+five-column form on each save (some editors strip trailing tabs, which crashes
+Philter's loader), and the previous version is kept as `.prev`.
+
+## The lazyman rule (`tidy_junkBelow`), explained fully
+
+Off by default. It exists for one kind of player: the one who used to open the
+item manager, sort by price, and autosell everything under some number. It does
+that once, at rule-writing time, so you never have to.
+
+- **Turn it on** with `set tidy_junkBelow = 1000` (any number above 100; at 100
+  or below it is off, because the floor rule already autosells 100-meat junk).
+- **What it does:** when tidy writes a rule for a new item kind, if the item's
+  mall price is at or below your number and it has an autosell value, the rule
+  is AUTO. Gear, potions, food and booze included. The reason column in the
+  preview says "lazyman rule".
+- **What it never touches**, because those checks come first: untradeables,
+  pieces of your saved outfits, familiar equipment, keep-list items, anything
+  already in your store or display case, anything Philter's default ruleset
+  says to keep, and HP/MP restoratives. Items with no autosell value are not
+  affected either; they follow the normal rules.
+- **It only applies to new rules.** Rules that already exist are not changed.
+  To apply it to everything you hold, turn it on and then `tidy reset`.
+- **Undo:** `tidy revert` after a reset, or turn it off and `tidy reset` again.
+- **It is the one setting that sells gear.** A duplicate seal-clubbing club is
+  junk to most people; if you are not most people, leave it off.
+
 ## Settings
 
 Set these in the gCLI with `set name = value`.
