@@ -12,8 +12,10 @@ and fixes the three things that make Philter annoying to run every day:
 2. **Philter reprices your whole listing when it adds stock.** For any item
    whose rule says MALL and which is already in your store, tidy tops the
    listing up at *your* price before Philter runs, so your prices stay yours.
-   The top-up counts the way Philter counts (bag, closet and worn copies), so
-   Philter finds nothing left to move.
+   The top-up counts the way Philter counts (bag, closet, and copies worn by
+   you or by any familiar in your terrarium). If Philter would fetch copies off
+   your familiars to sell them, tidy fetches them first and lists them at your
+   price, so Philter finds nothing left to move.
 3. **Stale prices.** Once per KoL day, tidy lowers any listing under a threshold
    (default 1,000,000 meat, adjustable or off) that sits above KoLmafia's market
    price. That price skips the five cheapest listings, so it never undercuts
@@ -52,7 +54,7 @@ git checkout https://github.com/birjeldadge/tidy
 ```
 
 That also installs Philter and zlib if you do not have them. Needs KoLmafia
-r26597 or newer.
+r27250 or newer.
 
 ## First run
 
@@ -240,7 +242,10 @@ and revert refuses an unreadable copy. Smaller fixes from the same review:
 negative or comma-formatted settings no longer switch guards off, the reset
 backup expires after your first live run on the new rules, `tidycloset go`
 checks for a preview before it empties the closet, and the store-price sanity
-check no longer trips on a listing parked at 999,999,999 meat.
+check no longer trips on a listing parked at 999,999,999 meat. A third review
+found the count still missed equipment on benched familiars; fixed, and tidy
+now fetches such copies itself before topping up, so Philter cannot re-list
+them at market. Needs KoLmafia r27250 or newer from this version on.
 
 - Aftercore only (refuses in Ronin or Hardcore).
 - Refuses until Hagnk's has been emptied this ascension (`pull all`).
@@ -252,7 +257,8 @@ check no longer trips on a listing parked at 999,999,999 meat.
 - A preview only counts as a preview if Philter's simulation ran to the end.
 - Before lowering any price it confirms with a fresh mall search, and never cuts more than `tidy_maxCutPct` in a day.
 - A listing already at or under market is never cut, whatever the price factor.
-- A rule written by a live run cannot sell in that run (`tidy_holdNewDays`). The hold, the store top-ups and the drip keep-counts all count bag + closet + worn copies, the way Philter does.
+- A rule written by a live run cannot sell in that run (`tidy_holdNewDays`). The hold, the store top-ups and the drip keep-counts all count bag + closet + worn copies, the way Philter does. "Worn" includes equipment on every familiar in your terrarium, which Philter counts and will take off them.
+- tidy takes a familiar item off a familiar only when a rule you wrote tells Philter to sell copies beyond the keep-count, and only so those copies list at your price; Philter would have taken them anyway. A preview sells nothing, but Philter's own simulation can move such copies into your bag (see DESIGN.md, known limits).
 - If a store price cannot be read, a top-up fails, a take-back fails, or any reprice fails, tidy stops before Philter runs.
 - Drip listings only ever list items whose rule says MALL.
 
