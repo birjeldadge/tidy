@@ -40,7 +40,9 @@
 //   tidy_allowGiving    false (default): rules that say CLAN (clan stash), GIFT (kmail) or DISC (discard) are turned into KEEP every run
 //   tidy_maxCutPct      30: the most the daily reprice may cut one listing in one day, as a percent of its current price
 //   tidy_holdNewDays    1: a live run writes rules for new item kinds but holds them this many days before they can sell (0 = off).
-//                       Holds, top-ups and drip keep-counts count bag + closet + worn copies, the way Philter does.
+//                       A held rule is released only after the wait AND after a preview has run to the end on a later day than
+//                       the rule was written (the preview lists every held rule and what would sell), so nothing sells on a
+//                       rule nobody looked at. Holds, top-ups and drip keep-counts count bag + closet + worn copies, as Philter does.
 //   tidy_priceFactor    multiply the market price by this when repricing (default 1.0 = match market;
 //                       0.99 = list 1% under the market price to get the sale first; never below 100 meat).
 //                       Applies only to listings above market: one already at or under market is never cut, because
@@ -670,6 +672,7 @@ void tidy_reset() {
 	if (!buffer_to_file(empty, RULES_FILE)) abort(tag + "could not clear " + RULES_FILE + ". Your old rules are still in place (backup at " + backupName + ").");
 	set_property("tidy_resetBackup", backupName);   // "tidy revert" restores this first
 	set_property("tidy_previewed", "false");        // the fresh rules have not been looked at yet
+	set_property("tidy_previewDay", "");
 	print(tag + "old rules saved as data/" + backupName + ". Undo with: tidy revert. Run a plain tidy and look before tidy go.", "olive");
 	IN_RESET = true;
 	tidy_run(true);
@@ -691,6 +694,7 @@ void tidy_revert() {
 			buffer_to_file(current, BACKUP_FILE);
 			set_property("tidy_resetBackup", "");
 			set_property("tidy_previewed", "false");
+			set_property("tidy_previewDay", "");
 			OCDinfo [item] check; file_to_map(RULES_FILE, check);
 			print(tag + "the reset is undone: " + RULES_FILE + " is back to the " + count(check) + " rules saved in " + resetBackup + ". Nothing was sold. Run a plain tidy before the next tidy go.", "olive");
 			return;
@@ -706,6 +710,7 @@ void tidy_revert() {
 	print(tag + RULES_FILE + " is back to its previous version (" + count(check) + " rules). Run tidy revert again to swap back. Nothing was sold. Run a plain tidy before the next tidy go.", "olive");
 	set_property("tidy_inheritedNoticed", "true");
 	set_property("tidy_previewed", "false");
+	set_property("tidy_previewDay", "");
 }
 
 // Entry point for the argument-taking scripts. Bare = preview. "go" = live. "reset" = clean sweep. Anything else = help.
@@ -787,18 +792,30 @@ void tidy_run(boolean sim) {
 	enforce_keep_one(rules, sim, tag);
 	boolean [item] pieces = outfit_piece_set();
 
-	// ---- release holds: rules written by an earlier LIVE run that have waited long enough
-	int released = 0; int stillHeld = 0; int raisedHold = 0; int holdDays = hold_new_days();
+	// ---- release holds: rules written by an earlier LIVE run, once the wait is over AND a preview has run since.
+	// The wait alone is a clock (UTC midnight), not a look: a rule decided from one bad price sample must not sell just
+	// because a day passed. A preview that ran to the end on a later day than the write listed the rule below, with what
+	// would sell; that is the look. A chained "garbo; tidy go" with nobody previewing keeps the hold.
+	int released = 0; int stillHeld = 0; int unseen = 0; int raisedHold = 0; int holdDays = hold_new_days();
+	int previewDay = get_property("tidy_previewDay").to_int();   // day number of the last preview that ran to the end
 	foreach it, r in rules {
 		if (!r.message.starts_with("tidy new ")) continue;
 		string [int] f = r.message.split_string(" ");   // "tidy new <day> q<decided keep-count>"
 		int since = (count(f) > 2) ? f[2].to_int() : 0;
 		int decidedQ = (count(f) > 3) ? f[3].substring(1).to_int() : 0;
-		if (today_number() - since >= holdDays) { rules[it].q = decidedQ; rules[it].message = ""; released += 1; }
-		else { stillHeld += 1; if (on_hand(it) > r.q) { rules[it].q = on_hand(it); raisedHold += 1; } }   // copies picked up since the rule was written are held too
+		int keepQ = max(decidedQ, protect_min(it, pieces));   // a keep-list or outfit count raised meanwhile wins over the old decision
+		boolean due = today_number() - since >= holdDays;
+		boolean seen = previewDay > since;
+		if (due && seen) { rules[it].q = keepQ; rules[it].message = ""; released += 1; continue; }
+		stillHeld += 1;
+		if (on_hand(it) > r.q) { rules[it].q = on_hand(it); raisedHold += 1; }   // copies picked up since the rule was written are held too
+		int wouldSell = on_hand(it) - keepQ; if (wouldSell < 0) wouldSell = 0;
+		if (due) unseen += 1;
+		print("  on hold: " + on_hand(it) + " " + it + "  ->  " + r.action + (keepQ > 0 ? " keep " + keepQ : "") + ", " + wouldSell + " would sell" + (due ? (sim ? " on the next tidy go, now that you have previewed" : "; run a plain tidy and look first") : " after the " + holdDays + "-day hold and a preview"), "olive");
 	}
-	if (released > 0) print(tag + released + " rule" + (released == 1 ? "" : "s") + " written by an earlier live run " + (released == 1 ? "is" : "are") + " past the " + holdDays + "-day hold and can sell now.", "blue");
-	if (stillHeld > 0) print(tag + stillHeld + " new-kind rule" + (stillHeld == 1 ? "" : "s") + " still on hold (written by a live run, nobody has looked yet). Review in Philter Manager; they sell after " + holdDays + " day" + (holdDays == 1 ? "" : "s") + ".", "olive");
+	if (released > 0) print(tag + released + " rule" + (released == 1 ? "" : "s") + " written by an earlier live run " + (released == 1 ? "is" : "are") + " past the " + holdDays + "-day hold, previewed since, and can sell now.", "blue");
+	if (unseen > 0) print(tag + unseen + " held rule" + (unseen == 1 ? " is" : "s are") + " past the hold but no preview has run since " + (unseen == 1 ? "it was" : "they were") + " written. " + (sim ? "This preview counts: they sell on the next tidy go." : "Nothing sells on them until you run a plain tidy and look."), "olive");
+	if (stillHeld > unseen) print(tag + (stillHeld - unseen) + " new-kind rule" + (stillHeld - unseen == 1 ? "" : "s") + " still inside the " + holdDays + "-day hold (written by a live run). Review in Philter Manager or in the lines above.", "olive");
 
 	// ---- new item kinds
 	int added = 0; int addMall = 0; int addAuto = 0; int addKeep = 0; int held = 0;
@@ -883,7 +900,7 @@ void tidy_run(boolean sim) {
 	int kindsAfter = count(get_inventory());
 	if (!philterOk) print(tag + "Philter stopped early (see the lines above). Some rules may not have run.", "red");
 	cli_execute("refresh shop");
-	if (sim && !IN_RESET && philterOk) set_property("tidy_previewed", "true");   // a simulation that stopped early is not a preview
+	if (sim && !IN_RESET && philterOk) { set_property("tidy_previewed", "true"); set_property("tidy_previewDay", today_number()); }   // a simulation that stopped early is not a preview
 	if (!sim) set_property("tidy_resetBackup", "");   // a live run on the fresh rules accepts the reset; revert now undoes the last run instead
 	print(tag + "finished. Inventory " + kindsBefore + " kinds -> " + kindsAfter + " kinds; meat " + rnum(meatBefore) + " -> " + rnum(my_meat()) + "; store now has " + count(get_shop()) + " listings.", "blue");
 }
