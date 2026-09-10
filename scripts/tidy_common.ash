@@ -81,18 +81,31 @@ string RULES_FILE = "OCDdata_" + DATA_NAME + ".txt";
 string BACKUP_FILE = "OCDdata_" + DATA_NAME + ".prev.txt";
 string KEEP_FILE = "tidy_keep_" + DATA_NAME + ".txt";
 string PIN_FILE = "tidy_pin_" + DATA_NAME + ".txt";
+boolean IN_RESET = false;        // a reset's own preview must not count as "the user looked"
+boolean SNAPSHOT_TAKEN = false;  // .prev is written once per run, on the first write of the rule file
+boolean RULES_WRITTEN = false;   // whether this run wrote the rule file at all
 
+// Plain digits, at most 15 of them (fits a long). is_integer() also accepts a leading sign and commas ("-1", "1,000"),
+// and to_int() turns a number too big for a long into 0 with nothing but a log line, so this is the only test used
+// for anything that guards a sale. The length test comes first: an ASH "for" counts down when the range is empty.
+boolean plain_digits(string s) {
+	if (s.length() == 0 || s.length() > 15) return false;
+	for i from 0 to s.length() - 1 { string c = s.char_at(i); if (c < "0" || c > "9") return false; }
+	return true;
+}
 // A whole-number preference. Unset = the default. Anything that is not plain digits stops the run:
-// a typo like "off" or "1e6" must never silently become 0 and switch a guard off.
+// a typo like "off", "-1" or "1e6" must never silently become 0 and switch a guard off.
 int pref_int(string name, int dflt) {
 	string s = get_property(name);
 	if (s == "") return dflt;
-	// plain digits only: is_integer() also accepts a leading sign and commas ("-1", "1,000"), and to_int() turns a number
-	// too big for a long into 0 with nothing but a log line; either would switch a guard off silently
-	boolean digits = s.length() <= 15;
-	for i from 0 to s.length() - 1 { string c = s.char_at(i); if (c < "0" || c > "9") digits = false; }
-	if (!digits) abort("tidy: " + name + " is set to '" + s + "', which is not a plain whole number (digits only: no sign, no commas, at most 15 digits). Fix it with: set " + name + " = " + dflt + " (or a number). Nothing done.");
+	if (!plain_digits(s)) abort("tidy: " + name + " is set to '" + s + "', which is not a plain whole number (digits only: no sign, no commas, at most 15 digits). Fix it with: set " + name + " = " + dflt + " (or a number). Nothing done.");
 	return s.to_int();
+}
+// For the help text only: shows a setting as typed, never stops (help must work when a setting is broken).
+string pref_text(string name, string dflt) {
+	string s = get_property(name);
+	if (s == "") return dflt + " (default)";
+	return plain_digits(s) ? s : s + " (NOT a plain number: every run will stop until you fix it)";
 }
 // Listings priced above this are never repriced. Unset = 1,000,000. 0 = off (everything gets repriced).
 int protect_above() {
@@ -213,6 +226,7 @@ int sale_price(item it) {
 string [string] load_restores() {
 	string [string] raw; string [string] r;
 	file_to_map("tidy_restores.txt", raw);
+	if (count(raw) == 0) print("tidy: data/tidy_restores.txt is missing or empty, so HP/MP restoratives get no special protection this run (reinstall tidy to get it back).", "red");
 	foreach k, v in raw { r[k] = v; r[entity_decode(k)] = v; }   // mafia item names carry entities (Pok&euml;mann); accept both forms
 	return r;
 }
@@ -279,50 +293,67 @@ string rule_line(item it, string action, int q, string info, string message) {
 	return "[" + it.to_int() + "]" + it.name + "\t" + action + "\t" + q + "\t" + info + "\t" + message + "\n";
 }
 
-// Taken once at the start of every run, so "tidy revert" undoes the whole run, not just its last save.
+// Taken once per run, on the first write of the rule file, so "tidy revert" undoes the whole run and a run that
+// writes nothing leaves the previous undo point alone. save_rules() is only ever reached after the file has been
+// parsed and checked, so a broken file never lands in .prev.
 void snapshot_rules() {
+	if (SNAPSHOT_TAKEN) return;
 	buffer current = file_to_buffer(RULES_FILE);
-	if (current.length() > 0) buffer_to_file(current, BACKUP_FILE);
+	if (current.length() > 0 && !buffer_to_file(current, BACKUP_FILE)) abort("tidy: could not write " + BACKUP_FILE + ", so the last good copy of your rules could not be kept. Nothing changed, nothing sold.");
+	SNAPSHOT_TAKEN = true;
 }
 
 // The whole file is always rewritten in canonical form ([id]name, action, q, info, message):
 // Philter's loader crashes on a rule line that lost its trailing columns (editors strip trailing tabs).
 void save_rules(OCDinfo [item] rules) {
+	snapshot_rules();
 	buffer out;
 	foreach it, r in rules out.append(rule_line(it, r.action, r.q, r.info, r.message));
 	if (!buffer_to_file(out, RULES_FILE)) abort("tidy: failed to write " + RULES_FILE + ". Nothing sold.");
+	RULES_WRITTEN = true;
 }
 
 // Every non-comment line of the rule file must be in the parsed map, because save_rules() rewrites the whole file
 // from that map: a line file_to_map skipped (no tab in it, an item this KoLmafia does not know, the same item twice)
-// would be dropped silently on the next save and its item re-decided as "new". So stop, and say which line.
+// would be dropped silently on the next save and its item re-decided as "new". A column mafia would quietly coerce
+// is just as bad: a keep-count that is not a number is read as 0 (or as its digits: "5k" becomes 5), an empty
+// action, or a MALL minimum price that is not a number (Philter's own loader throws on that). Stop, and say which line.
 void check_rule_file(OCDinfo [item] rules, string tag) {
 	string text = file_to_buffer(RULES_FILE).to_string();
-	int lines = 0; int noTab = 0; int unknown = 0; string first = "";
+	int lines = 0; int noTab = 0; int unknown = 0; int badCol = 0; string first = ""; string firstWhy = "";
 	foreach i, raw in text.split_string("\n") {
 		string line = raw;
 		if (line.ends_with("\r")) line = line.substring(0, line.length() - 1);
 		if (line.length() == 0 || line.starts_with("#")) continue;
 		lines += 1;
 		int tab = line.index_of("\t");
-		if (tab < 0) { noTab += 1; if (first == "") first = line; continue; }
-		if (line.substring(0, tab).to_item() == $item[none]) { unknown += 1; if (first == "") first = line; }
+		if (tab < 0) { noTab += 1; if (first == "") { first = line; firstWhy = "no tab"; } continue; }
+		if (line.substring(0, tab).to_item() == $item[none]) { unknown += 1; if (first == "") { first = line; firstWhy = "unknown item"; } continue; }
+		string [int] col = line.split_string("\t");
+		string action = (count(col) > 1) ? col[1] : ""; string q = (count(col) > 2) ? col[2] : ""; string info = (count(col) > 3) ? col[3] : "";
+		string why = "";
+		if (action.length() == 0) why = "an empty action column";
+		else if (q.length() > 0 && !plain_digits(q)) why = "a keep-count that is not a plain number ('" + q + "', which mafia would read as " + q.to_int() + ")";
+		else if (action == "MALL" && info.length() > 0 && !plain_digits(info)) why = "a MALL minimum price that is not a plain number ('" + info + "'; Philter refuses such a line)";
+		if (why != "") { badCol += 1; if (first == "") { first = line; firstWhy = why; } }
 	}
 	// file_to_map files an unknown item under $item[none], one key however many such lines there are
 	int known = count(rules) - ((rules contains $item[none]) ? 1 : 0);
 	int dup = lines - noTab - unknown - known;
-	if (noTab == 0 && unknown == 0 && dup <= 0) return;
+	if (noTab == 0 && unknown == 0 && dup <= 0 && badCol == 0) return;
 	string why = "";
 	if (noTab > 0) why += noTab + " line" + (noTab == 1 ? " has" : "s have") + " no tab in " + (noTab == 1 ? "it" : "them") + " (an editor that turns tabs into spaces?); ";
-	if (unknown > 0) why += unknown + " line" + (unknown == 1 ? " names" : "s name") + " an item this KoLmafia does not know; ";
+	if (unknown > 0) why += unknown + " line" + (unknown == 1 ? " names" : "s name") + " an item this KoLmafia does not know (if that line looks normal, the file may start with a hidden byte-order mark: save it as plain UTF-8); ";
 	if (dup > 0) why += dup + " line" + (dup == 1 ? " repeats" : "s repeat") + " an item already in the file; ";
-	abort(tag + "data/" + RULES_FILE + " has " + lines + " rule lines but only " + count(rules) + " loaded: " + why + "first odd line: " + first + " -- a rewrite would drop them, so nothing was changed. Fix the file in a tab-preserving editor, update KoLmafia, or run tidy reset to start over (the old file is backed up first).");
+	if (badCol > 0) why += badCol + " line" + (badCol == 1 ? " has" : "s have") + " a column mafia would silently rewrite; ";
+	abort(tag + "data/" + RULES_FILE + " has " + lines + " rule lines, " + count(rules) + " loaded cleanly: " + why + "first odd line (" + firstWhy + "): " + first + " -- a rewrite would drop or change them, so nothing was changed. Fix the file in a tab-preserving editor, update KoLmafia, or run tidy reset to start over (the old file is backed up first).");
 }
 
 // Philter's default ruleset (installed with Philter); Bale's older OCDefault.txt as fallback.
 OCDinfo [item] load_defaults() {
 	OCDinfo [item] bale;
 	if (!file_to_map("ocd-cleanup-default.txt", bale) || count(bale) == 0) file_to_map("OCDefault.txt", bale);
+	if (count(bale) == 0) print("tidy: no default ruleset found (data/ocd-cleanup-default.txt from Philter, or OCDefault.txt): new item kinds get fewer KEEP defaults than usual.", "olive");
 	return bale;
 }
 
@@ -520,7 +551,7 @@ void drip_step(OCDinfo [item] rules, int [item] shop, boolean sim, string tag) {
 		// whatever is still on hand stays on hand: Philter must not list it (it counts bag + closet + worn, so keep that many)
 		if ((rules contains it) && rules[it].action != "KEEP") rules[it].q = on_hand(it);
 	}
-	map_to_file(state, DRIP_STATE_FILE);
+	if (!map_to_file(state, DRIP_STATE_FILE)) print(tag + "warning: could not write " + DRIP_STATE_FILE + "; the empty-day counters may be off tomorrow.", "red");
 	save_rules(rules);
 	print(tag + "drip: " + listed + " " + (sim ? "would be " : "") + "listed, " + waiting + " waiting out the empty days, " + held + " held back while listed. Rule keep-counts set to what is on hand.", "blue");
 }
@@ -536,7 +567,8 @@ void set_philter_var(string name, string value, string tag) {
 		abort(tag + "could not set Philter's " + name + " to " + value + ". Stopping before anything is sold.");
 }
 
-void common_guards(string tag) {
+void common_guards(boolean sim, string tag) {
+	if (!sim && get_property("tidy_rulesSuffix") != "") abort(tag + "tidy_rulesSuffix is set to '" + get_property("tidy_rulesSuffix") + "', which points at a test rule file, and the preview and reprice records are not scoped by it. Live runs are refused while it is set. Clear it with: set tidy_rulesSuffix =");
 	if (!can_interact()) abort(tag + "you are in Ronin or Hardcore. This is an aftercore tool.");
 	if (get_property("lastEmptiedStorage").to_int() != my_ascensions())
 		abort(tag + "Hagnk's has not been emptied this ascension. Run 'pull all' first.");
@@ -544,13 +576,14 @@ void common_guards(string tag) {
 		print(tag + "BaleOCD_EmptyCloset was '" + getvar("BaleOCD_EmptyCloset") + "'; setting it to -1 so Philter never dumps the closet on its own.", "olive");
 		set_philter_var("BaleOCD_EmptyCloset", "-1", tag);
 	}
-	// always point Philter at this character's rule file
-	set_philter_var("BaleOCD_DataFile", DATA_NAME, tag);
+}
+// Philter is pointed at this character's rule file only for the moment it runs (see tidy_run), and back at the real file
+// afterwards, so a run under the test suffix never leaves Philter or its Manager looking at the test file.
+void restore_datafile(string tag) {
+	if (DATA_NAME != my_name()) set_philter_var("BaleOCD_DataFile", my_name(), tag);
 }
 
 void tidy_run(boolean sim);   // defined below; ASH needs to see it before tidy_closet_run uses it
-boolean IN_RESET = false;      // a reset's own preview must not count as "the user looked"
-boolean SNAPSHOT_TAKEN = false;   // tidycloset go takes its .prev before writing closet rules; tidy_run must not replace it
 
 // Write rules for closet items that have none, and turn KEEP rules on closet items into
 // CLST rules that keep today's inventory count on hand and file the rest back into the closet.
@@ -591,12 +624,11 @@ int closet_bootstrap(OCDinfo [item] rules, int [item] closet, string tag, boolea
 // The preview writes any missing closet rules; the live run refuses until a preview ran today.
 void tidy_closet_run(boolean sim) {
 	string tag = sim ? "tidycloset (preview): " : "tidycloset: ";
-	common_guards(tag);
+	common_guards(sim, tag);
 	OCDinfo [item] rules;
 	if (!file_to_map(RULES_FILE, rules) || count(rules) == 0) abort(tag + "no rule file " + RULES_FILE + " yet. Run plain tidy first.");
 	if (!sim && get_property("_tidyClosetPreviewed") != "true") abort(tag + "run the preview first (plain tidycloset, no go, once per day) and look at what it will do.");
 	check_rule_file(rules, tag);
-	snapshot_rules();
 	cli_execute("refresh closet");
 	int [item] closet = get_closet();
 	closet_bootstrap(rules, closet, tag, !sim);
@@ -623,7 +655,6 @@ void tidy_closet_run(boolean sim) {
 	if (get_property("tidy_previewed") != "true") abort(tag + "run a plain tidy preview first and look at what it will do. The closet was not touched.");
 	print(tag + "emptying the closet into inventory...", "red");
 	if (!empty_closet()) abort(tag + "could not empty the closet. Nothing sold.");
-	SNAPSHOT_TAKEN = true;
 	tidy_run(false);
 	cli_execute("refresh closet");
 	print(tag + "done. Closet now holds " + count(get_closet()) + " kinds.", "blue");
@@ -643,14 +674,14 @@ void tidy_help() {
 	h_cmd("tidy revert", "undo the last change tidy made to your rule file (after a reset, restores the backup; otherwise swaps in the .prev copy)");
 	h_cmd("tidy help", "this text. Any other word prints it too and does nothing else");
 	h_section("Settings (set name = value)");
-	h_cmd("tidy_keepAbove", (keep_above() > 0 ? rnum(keep_above()) : "off") + " - new item kinds worth this much each start as KEEP, whatever the count (0 = off)");
+	h_cmd("tidy_keepAbove", pref_text("tidy_keepAbove", "10000") + " - new item kinds worth this much each start as KEEP, whatever the count (0 = off)");
 	h_cmd("tidy_reprice", reprice_mode() + " - down = never raise, never chase a floor; both = follow market either way; off = never reprice");
-	h_cmd("tidy_protectAbove", (protect_above() > 0 ? rnum(protect_above()) : "off") + " - listings priced above this are never repriced (0 = off, unset = 1,000,000)");
+	h_cmd("tidy_protectAbove", pref_text("tidy_protectAbove", "1000000") + " - listings priced above this are never repriced (0 = off)");
 	h_cmd("tidy_priceFactor", price_factor() + " - multiply the market price when repricing (1.0 = match, 0.99 = 1% under)");
 	h_cmd("tidy_priceJitter", price_jitter() + " - random spread around the factor, per item per day (0 = off)");
-	h_cmd("tidy_maxCutPct", max_cut_pct() + "% - the most one listing may be cut in one day; the rest comes on later days if the market stays down");
-	h_cmd("tidy_holdNewDays", hold_new_days() + " - rules a live run writes for new item kinds are held this many days before they can sell (0 = off)");
-	h_cmd("tidy_junkBelow", (junk_below() > 0 ? rnum(junk_below()) : "off") + " - the lazyman rule: new item kinds worth this much or less each, with an autosell value, start as AUTO, gear and consumables included (set above 100 to turn on)");
+	h_cmd("tidy_maxCutPct", pref_text("tidy_maxCutPct", "30") + "% - the most one listing may be cut in one day; the rest comes on later days if the market stays down");
+	h_cmd("tidy_holdNewDays", pref_text("tidy_holdNewDays", "1") + " - rules a live run writes for new item kinds are held this many days, and until a later preview has listed them (0 = off)");
+	h_cmd("tidy_junkBelow", pref_text("tidy_junkBelow", "off") + " - the lazyman rule: new item kinds worth this much or less each, with an autosell value, start as AUTO, gear and consumables included (set above 100 to turn on)");
 	h_cmd("tidy_sellConsumables", (sell_consumables() ? "true" : "false") + " - false = potions, food, booze and spleen items with no rule start as KEEP");
 	h_cmd("tidy_allowGiving", (get_property("tidy_allowGiving") == "true" ? "true" : "false") + " - false = old CLAN/GIFT/DISC rules (clan stash, kmail, discard) are turned into KEEP");
 	h_section("Files in data/ (all optional)");
@@ -665,7 +696,7 @@ void tidy_help() {
 void tidy_reset() {
 	string tag = "tidy reset: ";
 	buffer current = file_to_buffer(RULES_FILE);
-	if (current.length() == 0) { print(tag + "no rule file " + RULES_FILE + " to reset; plain tidy will write a fresh one.", "olive"); tidy_run(true); return; }
+	if (current.length() == 0) { print(tag + "no rule file " + RULES_FILE + " to reset; writing a fresh one now (a plain tidy is still needed before tidy go).", "olive"); IN_RESET = true; tidy_run(true); IN_RESET = false; return; }
 	string backupName = "OCDdata_" + DATA_NAME + ".before-reset-" + now_to_string("yyyyMMdd-HHmmss") + ".txt";
 	if (!buffer_to_file(current, backupName)) abort(tag + "could not write the backup " + backupName + ". Nothing changed.");
 	buffer empty;
@@ -691,7 +722,7 @@ void tidy_revert() {
 		if (old.length() > 0) {
 			buffer current = file_to_buffer(RULES_FILE);
 			if (!buffer_to_file(old, RULES_FILE)) abort(tag + "could not write " + RULES_FILE + ". Nothing changed.");
-			buffer_to_file(current, BACKUP_FILE);
+			if (!buffer_to_file(current, BACKUP_FILE)) print(tag + "warning: could not write " + BACKUP_FILE + ", so a second revert cannot swap back.", "red");
 			set_property("tidy_resetBackup", "");
 			set_property("tidy_previewed", "false");
 			set_property("tidy_previewDay", "");
@@ -706,9 +737,8 @@ void tidy_revert() {
 	OCDinfo [item] check; file_to_map(BACKUP_FILE, check);
 	if (count(check) == 0) abort(tag + BACKUP_FILE + " holds no readable rules (tabs replaced by spaces?), so it is not a version worth going back to; not restoring it. Nothing changed.");
 	if (!buffer_to_file(prev, RULES_FILE)) abort(tag + "could not write " + RULES_FILE + ". Nothing changed.");
-	buffer_to_file(current, BACKUP_FILE);
+	if (!buffer_to_file(current, BACKUP_FILE)) print(tag + "warning: could not write " + BACKUP_FILE + ", so a second revert cannot swap back.", "red");
 	print(tag + RULES_FILE + " is back to its previous version (" + count(check) + " rules). Run tidy revert again to swap back. Nothing was sold. Run a plain tidy before the next tidy go.", "olive");
-	set_property("tidy_inheritedNoticed", "true");
 	set_property("tidy_previewed", "false");
 	set_property("tidy_previewDay", "");
 }
@@ -732,7 +762,7 @@ void tidy_dispatch(string which, string [int] args) {
 
 void tidy_run(boolean sim) {
 	string tag = sim ? "tidy (preview): " : "tidy: ";
-	common_guards(tag);
+	common_guards(sim, tag);
 
 	// ---- first run: write rules, sell nothing
 	OCDinfo [item] rules;
@@ -742,10 +772,7 @@ void tidy_run(boolean sim) {
 		clear(rules);
 		file_to_map(RULES_FILE, rules);
 	}
-	else {
-		check_rule_file(rules, tag);   // every line must have made it into the map, or a rewrite would drop rules
-		if (!SNAPSHOT_TAKEN) snapshot_rules();   // only after the checks: a broken file must never overwrite the last good .prev
-	}
+	else check_rule_file(rules, tag);   // every line must have made it into the map, or a rewrite would drop rules; .prev is taken on the first write, after this
 	if (!sim && get_property("tidy_previewed") != "true")
 		abort(tag + "run a preview first (plain tidy, no go) and look at what it will do.");
 
@@ -836,7 +863,7 @@ void tidy_run(boolean sim) {
 	}
 	if (held > 0) print(tag + held + " new MALL/AUTO rule" + (held == 1 ? "" : "s") + " written but held: nothing sells on a rule the same run that wrote it. Run a preview or open Philter Manager to review them; they sell after " + holdDays + " day" + (holdDays == 1 ? "" : "s") + " (tidy_holdNewDays).", "olive");
 	if ((released > 0 || raisedHold > 0) && added == 0) save_rules(rules);
-	if (added == 0) print(tag + "no new item kinds; rule file unchanged.", "blue");
+	if (added == 0) print(tag + "no new item kinds" + (RULES_WRITTEN ? "." : "; rule file unchanged."), "blue");
 	else {
 		save_rules(rules);
 		print(tag + "added " + added + " rules (" + addMall + " mall, " + addAuto + " autosell, " + addKeep + " keep) to data/" + RULES_FILE + ". Previous file saved as " + BACKUP_FILE + ".", "blue");
@@ -891,6 +918,7 @@ void tidy_run(boolean sim) {
 	else print(tag + "no store listings need topping up.", "blue");
 
 	// ---- Philter
+	set_philter_var("BaleOCD_DataFile", DATA_NAME, tag);   // this character's rule file (with the test suffix, if any, for this run only)
 	set_philter_var("BaleOCD_Sim", sim ? "true" : "false", tag);
 	if (sim && getvar("BaleOCD_Sim") != "true") abort(tag + "Philter is not in simulation mode. Stopping before anything is sold.");
 	int meatBefore = my_meat();
@@ -902,5 +930,6 @@ void tidy_run(boolean sim) {
 	cli_execute("refresh shop");
 	if (sim && !IN_RESET && philterOk) { set_property("tidy_previewed", "true"); set_property("tidy_previewDay", today_number()); }   // a simulation that stopped early is not a preview
 	if (!sim) set_property("tidy_resetBackup", "");   // a live run on the fresh rules accepts the reset; revert now undoes the last run instead
+	restore_datafile(tag);
 	print(tag + "finished. Inventory " + kindsBefore + " kinds -> " + kindsAfter + " kinds; meat " + rnum(meatBefore) + " -> " + rnum(my_meat()) + "; store now has " + count(get_shop()) + " listings.", "blue");
 }

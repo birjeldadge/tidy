@@ -37,7 +37,7 @@ Nothing runs live without the word `go`.
 | `tidy go` | Live. Rules for new item kinds, keep-count check, daily reprice, drip listings, store top-ups at your prices, then Philter. Refuses until a preview has been run at least once. |
 | `tidy help` | Prints the commands, your current settings, and which optional files are loaded. Does nothing else. Any other word does the same, after naming the word it did not understand. |
 | `tidy reset` | Clean sweep. Backs up your rule file as `OCDdata_<name>.before-reset-<date>-<time>.txt`, then runs the first-run preview: a fresh rule for every item kind in your inventory, nothing sold. `tidy go` is refused until you have run a plain `tidy` and looked. The dated backup stays the target of `tidy revert` until your first live run on the new rules; after that, revert goes back to undoing the last run. For people who picked up Philter years ago and cannot remember what they decided. |
-| `tidy revert` | Undo. Right after a reset it restores the dated backup. Otherwise it swaps in the `.prev` copy that every rule-file write leaves behind; run it again to swap back. Refuses a copy that holds no readable rules. After any revert, `tidy go` waits for a fresh preview. Never sells anything. |
+| `tidy revert` | Undo. Right after a reset it restores the dated backup. Otherwise it swaps in the `.prev` copy taken by the last run that changed the file; run it again to swap back. Refuses a copy that holds no readable rules. After any revert, `tidy go` waits for a fresh preview. Never sells anything. |
 | `tidycloset` | Preview. Writes rules for closet items that have none, then tallies. Moves nothing. |
 | `tidycloset go` | Live, one-off. Empties the closet into inventory and runs the tidy pipeline. Refuses unless the closet preview ran the same day and a plain `tidy` preview has been run; both checks come before the closet is emptied. |
 
@@ -130,8 +130,9 @@ It never changes the action you chose on any other rule. Sort by price in
 Philter Manager, set PULV, AUTO, MALL or KEEP however you like, and `tidy go`
 will honour it every day after. The whole file is rewritten in a clean
 five-column form on each save (some editors strip trailing tabs, which crashes
-Philter's loader). A copy of the file as it was at the start of the run (taken after it has been
-read and checked) is kept as `.prev`, so `tidy revert` undoes the whole run.
+Philter's loader). A copy of the file as it was before the run's first change (taken after it has
+been read and checked) is kept as `.prev`, so `tidy revert` undoes the whole
+run; a run that changes nothing leaves `.prev` alone.
 
 ## The lazyman rule (`tidy_junkBelow`), explained fully
 
@@ -172,7 +173,7 @@ Set these in the gCLI with `set name = value`.
 | `tidy_allowGiving` | false | While false, any CLAN, GIFT or DISC rule is turned into KEEP each run, so nothing goes to the clan stash, to another player, or into the void. |
 | `tidy_priceFactor` | 1.0 | Multiplies the market price when repricing and when pricing a fresh drip lot. `0.99` lists 1% under it (10 meat on a 1,000-meat item, 10,000 on a 1,000,000-meat item) so you get the sale first. Floor of 100 meat still applies. Only a listing above market is cut; one already at or under market is left alone, because the market figure counts your own units and cutting there would chase your own price down 1% a day. |
 | `tidy_priceJitter` | 0 | Random spread around the factor, so your prices are not a fixed pattern a rival can read. `0.01` with factor `0.99` draws a factor between 0.98 and 1.00 per item per day. A listing already inside that band is left alone, so this does not churn your whole store daily. Never above 1.0. |
-| `tidy_rulesSuffix` | (empty) | Testing only. Use `OCDdata_<name><suffix>.txt` instead of your real rules. |
+| `tidy_rulesSuffix` | (empty) | Testing only. Use `OCDdata_<name><suffix>.txt` (and the matching keep, pin and drip files) instead of your real ones. Live runs are refused while it is set. |
 
 **Keep list.** Create `data/tidy_keep_<yourname>.txt` with one item per line,
 `item name`, a tab, then a count. Those items always keep at least that many
@@ -250,13 +251,20 @@ now fetches such copies itself before topping up, so Philter cannot re-list
 them at market. Needs KoLmafia r27250 or newer from this version on. The same
 review found that the hold released on the calendar alone, so a rule decided
 from one bad price sample could sell the next evening with nobody looking; a
-held rule now waits for a preview as well.
+held rule now waits for a preview as well. Its smaller findings, fixed in the
+same evening: `.prev` is taken on the first write of a run instead of at the
+start, so a run that changes nothing no longer moves the undo point; a
+keep-count or minimum price that is not a plain number stops the run instead
+of being rewritten as 0; live runs are refused under the test suffix; `tidy
+help` no longer stops on a broken setting.
 
 - Aftercore only (refuses in Ronin or Hardcore).
 - Refuses until Hagnk's has been emptied this ascension (`pull all`).
 - Forces Philter's `BaleOCD_EmptyCloset` to -1 so Philter never dumps your closet on its own.
-- Every run copies your rule file to `OCDdata_<name>.prev.txt`, but only after it has been read and checked, so a broken file never overwrites the last good copy.
-- A rule file that exists but does not parse is never overwritten; tidy stops and tells you. So does a file with lines a rewrite would drop (no tab in the line, an item this KoLmafia does not know, the same item twice): tidy names the first such line and changes nothing.
+- The first time a run writes your rule file it copies the file as it was to `OCDdata_<name>.prev.txt`, after it has been read and checked; a run that writes nothing leaves the previous copy alone, so `tidy revert` always undoes the last run that changed something. If that copy cannot be written, the run stops before changing anything.
+- A rule file that exists but does not parse is never overwritten; tidy stops and tells you. So does a file with lines a rewrite would drop (no tab in the line, an item this KoLmafia does not know, the same item twice) or quietly change (a keep-count that is not a plain number: `x` would become 0 and `5k` would become 5; an empty action; a MALL minimum price that is not a number): tidy names the first such line and changes nothing.
+- Live runs are refused while `tidy_rulesSuffix` is set. Philter is pointed at the suffixed file only for the moment it runs and back at your real rule file straight after, so neither Philter nor its Manager is left looking at a test file.
+- `tidy help` never stops on a broken setting; it shows the setting as typed and says so.
 - `tidy revert` refuses to restore a copy that holds no readable rules.
 - A setting that is not a plain whole number (`off`, `-1`, `1,000`, more than 15 digits) stops the run instead of silently becoming 0 and switching a guard off.
 - A preview only counts as a preview if Philter's simulation ran to the end.
