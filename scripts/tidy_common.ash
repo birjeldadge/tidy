@@ -429,16 +429,27 @@ void drip_step(OCDinfo [item] rules, int [item] shop, boolean sim, string tag) {
 	print(tag + "drip: " + listed + " " + (sim ? "would be " : "") + "listed, " + waiting + " waiting out the empty days, " + held + " held back while listed. Rule keep-counts set to what is on hand.", "blue");
 }
 
+// Set one of Philter's zlib settings and prove it stuck. The "zlib name = value" CLI command
+// silently refuses a name it has never seen, and Philter only creates its settings the first
+// time Philter itself runs; on a fresh install that would have left BaleOCD_Sim unset and turned
+// a preview into a live run. So write through zlib's own map, save, and read back, or stop.
+void set_philter_var(string name, string value, string tag) {
+	vars[name] = value;
+	boolean saved = updatevars();
+	if (!saved || getvar(name) != value)
+		abort(tag + "could not set Philter's " + name + " to " + value + ". Stopping before anything is sold.");
+}
+
 void common_guards(string tag) {
 	if (!can_interact()) abort(tag + "you are in Ronin or Hardcore. This is an aftercore tool.");
 	if (get_property("lastEmptiedStorage").to_int() != my_ascensions())
 		abort(tag + "Hagnk's has not been emptied this ascension. Run 'pull all' first.");
 	if (getvar("BaleOCD_EmptyCloset") != "-1") {
-		print(tag + "BaleOCD_EmptyCloset was " + getvar("BaleOCD_EmptyCloset") + "; setting it to -1 so Philter never dumps the closet on its own.", "olive");
-		cli_execute("zlib BaleOCD_EmptyCloset = -1");
+		print(tag + "BaleOCD_EmptyCloset was '" + getvar("BaleOCD_EmptyCloset") + "'; setting it to -1 so Philter never dumps the closet on its own.", "olive");
+		set_philter_var("BaleOCD_EmptyCloset", "-1", tag);
 	}
 	// always point Philter at this character's rule file
-	cli_execute("zlib BaleOCD_DataFile = " + DATA_NAME);
+	set_philter_var("BaleOCD_DataFile", DATA_NAME, tag);
 }
 
 void tidy_run(boolean sim);   // defined below; ASH needs to see it before tidy_closet_run uses it
@@ -709,7 +720,8 @@ void tidy_run(boolean sim) {
 	else print(tag + "no store listings need topping up.", "blue");
 
 	// ---- Philter
-	cli_execute("zlib BaleOCD_Sim = " + (sim ? "true" : "false"));
+	set_philter_var("BaleOCD_Sim", sim ? "true" : "false", tag);
+	if (sim && getvar("BaleOCD_Sim") != "true") abort(tag + "Philter is not in simulation mode. Stopping before anything is sold.");
 	int meatBefore = my_meat();
 	int kindsBefore = count(get_inventory());
 	print(tag + "running Philter " + (sim ? "in simulation" : "LIVE") + "...", sim ? "olive" : "red");
