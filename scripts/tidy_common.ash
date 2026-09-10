@@ -26,11 +26,17 @@
 //   tidy_protectAbove   listings priced above this are never repriced (default 10000000)
 //   tidy_priceFactor    multiply the market price by this when repricing (default 1.0 = match market;
 //                       0.99 = list 1% under the market price to get the sale first; never below 100 meat)
+//   tidy_priceJitter    random spread around the factor (default 0). 0.01 with factor 0.99 draws a factor
+//                       between 0.98 and 1.00 per item per day; a listing already inside that band is left alone.
 //   tidy_rulesSuffix    testing only: use OCDdata_<name><suffix>.txt instead of your real rules
 // Optional file data/tidy_keep_<name>.txt, one "item name<TAB>count" per line:
 //   those items always keep at least that many copies on hand (MALL/AUTO rules are patched).
 // Optional file data/tidy_pin_<name>.txt, one item name per line:
 //   those store listings are never repriced (hand-set prices, "keeping an eye on it" listings).
+// Optional file data/tidy_drip_<name>.txt, one "item name<TAB>count<TAB>days" per line (days optional):
+//   list that many only when your store holds none of it and it has been empty that many days; never
+//   top up while any are listed; the rest stays in inventory (tidy sets the rule's keep-count to match).
+//   Rivals see a small stock that runs dry, not a deep one, so they price against you less.
 
 since r26597;   // git checkout honours manifest.json root_directory (needed to install Philter automatically)
 
@@ -79,6 +85,50 @@ boolean [item] load_pin_list() {
 	return p;
 }
 boolean [item] PIN_LIST = load_pin_list();
+
+float price_jitter() {
+	float j = get_property("tidy_priceJitter").to_float();
+	return (j > 0.0 && j < 1.0) ? j : 0.0;
+}
+// The band a listing may sit in: factor - jitter .. factor + jitter, never above 1.0, never below 100 meat.
+int band_low(int mkt) { float lo = price_factor() - price_jitter(); if (lo < 0.01) lo = 0.01; int p = floor(mkt * lo); return p < 100 ? 100 : p; }
+int band_high(int mkt) { float hi = price_factor() + price_jitter(); if (hi > 1.0) hi = 1.0; int p = floor(mkt * hi); return p < 100 ? 100 : p; }
+// A fresh price for a listing: a random point in the band (or exactly the factor when jitter is 0).
+int target_price(int mkt) {
+	if (price_jitter() == 0.0) { int p = floor(mkt * price_factor()); return p < 100 ? 100 : p; }
+	int lo = band_low(mkt); int hi = band_high(mkt);
+	if (hi <= lo) return lo;
+	return lo + random(hi - lo + 1);
+}
+
+// Drip listings (data/tidy_drip_<name>.txt): item, count to list at a time, days to stay empty first.
+record DripSpec {
+	int n;
+	int days;
+};
+string DRIP_FILE = "tidy_drip_" + my_name() + ".txt";
+string DRIP_STATE_FILE = "tidy_drip_state_" + my_name() + ".txt";   // real day number each drip listing was first seen empty
+DripSpec [item] load_drip_list() {
+	DripSpec [item] d;
+	string text = file_to_buffer(DRIP_FILE).to_string();
+	if (text.length() == 0) return d;
+	foreach i, line in text.split_string("\n") {
+		string s = line;
+		if (s.ends_with("\r")) s = s.substring(0, s.length() - 1);
+		if (s.length() == 0 || s.starts_with("#")) continue;
+		string [int] f = s.split_string("\t");
+		item it = f[0].to_item();
+		if (it == $item[none]) { print("tidy: drip list line not an item, ignored: " + s, "red"); continue; }
+		DripSpec spec;
+		spec.n = (count(f) > 1) ? f[1].to_int() : 1;
+		spec.days = (count(f) > 2) ? f[2].to_int() : 0;
+		if (spec.n < 1) spec.n = 1;
+		if (spec.days < 0) spec.days = 0;
+		d[it] = spec;
+	}
+	return d;
+}
+DripSpec [item] DRIP_LIST = load_drip_list();
 
 int sale_price(item it) {
 	if (historical_age(it) < 1 && historical_price(it) > 0) return historical_price(it);
@@ -250,16 +300,65 @@ void reprice_store(boolean sim, string tag) {
 		int mkt = (cur >= 10000) ? mall_price(it, 0.0) : mall_price(it);
 		if (mkt <= 0) { noPrice += 1; continue; }
 		if (mkt > limit) { protectedCount += 1; continue; }
-		if (factor < 1.0) mkt = floor(mkt * factor);
-		if (mkt < 100) mkt = 100;
-		if (mkt == cur) { same += 1; continue; }
+		// inside the allowed band already: leave it (with jitter 0 the band is a single price)
+		if (cur >= band_low(mkt) && cur <= band_high(mkt)) { same += 1; continue; }
+		int newp = target_price(mkt);
+		if (newp == cur) { same += 1; continue; }
 		changed += 1;
-		if (sim) print("  would reprice " + n + " " + it + ": " + rnum(cur) + " -> " + rnum(mkt), "black");
-		else if (reprice_shop(mkt, shop_limit(it), it)) print("  repriced " + n + " " + it + ": " + rnum(cur) + " -> " + rnum(mkt), "black");
+		if (sim) print("  would reprice " + n + " " + it + ": " + rnum(cur) + " -> " + rnum(newp), "black");
+		else if (reprice_shop(newp, shop_limit(it), it)) print("  repriced " + n + " " + it + ": " + rnum(cur) + " -> " + rnum(newp), "black");
 		else print(tag + "could not reprice " + it + "; left at " + rnum(cur) + ".", "red");
 	}
 	if (!sim) set_property("_tidyRepricedToday", "true");
-	print(tag + (sim ? "would reprice " : "repriced ") + changed + " listing" + (changed == 1 ? "" : "s") + " to market" + (factor < 1.0 ? " x " + factor : "") + "; " + same + " already there; " + protectedCount + " left alone (over " + rnum(limit) + " meat); " + pinned + " pinned; " + noPrice + " with no market price.", "blue");
+	string how = (factor < 1.0 || price_jitter() > 0.0) ? " (factor " + factor + (price_jitter() > 0.0 ? " +/- " + price_jitter() : "") + ")" : "";
+	print(tag + (sim ? "would reprice " : "repriced ") + changed + " listing" + (changed == 1 ? "" : "s") + " to market" + how + "; " + same + " already there; " + protectedCount + " left alone (over " + rnum(limit) + " meat); " + pinned + " pinned; " + noPrice + " with no market price.", "blue");
+}
+
+// Drip listings: list a fixed count only when the store holds none (and it has been empty long
+// enough), never top up while any are listed, and hold the rest in inventory by setting the
+// rule's keep-count to whatever is on hand, so Philter never lists it either.
+void drip_step(OCDinfo [item] rules, int [item] shop, boolean sim, string tag) {
+	if (count(DRIP_LIST) == 0) return;
+	int [item] state;
+	file_to_map(DRIP_STATE_FILE, state);
+	int today = now_to_int() / 86400000;   // real days, never wraps (the in-game calendar day wraps every 96 days)
+	int listed = 0; int waiting = 0; int held = 0;
+	foreach it, spec in DRIP_LIST {
+		int inStore = (shop contains it) ? shop[it] : 0;
+		if (inStore > 0) {
+			if (state contains it) remove state[it];
+			held += 1;
+			print("  drip: " + inStore + " " + it + " listed; holding " + item_amount(it) + " back until they sell out", "black");
+		}
+		else if (item_amount(it) <= 0) {
+			print("  drip: " + it + " sold out and none on hand", "black");
+		}
+		else {
+			if (!(state contains it)) state[it] = today;
+			int emptyDays = today - state[it];
+			if (emptyDays < spec.days) {
+				waiting += 1;
+				print("  drip: " + it + " empty for " + emptyDays + " of " + spec.days + " days; not relisting yet", "black");
+			}
+			else {
+				int mkt = mall_price(it, 0.0);
+				if (mkt <= 0) print(tag + "drip: no market price for " + it + "; not listed.", "red");
+				else {
+					int price = target_price(mkt);
+					int n = min(spec.n, item_amount(it));
+					listed += 1;
+					if (sim) print("  drip: would list " + n + " " + it + " at " + rnum(price) + " (holding " + (item_amount(it) - n) + " back)", "black");
+					else if (put_shop(price, 0, n, it)) { print("  drip: listed " + n + " " + it + " at " + rnum(price) + " (holding " + item_amount(it) + " back)", "black"); remove state[it]; }
+					else print(tag + "drip: could not list " + it + ".", "red");
+				}
+			}
+		}
+		// whatever is still on hand stays on hand: Philter must not list it
+		if ((rules contains it) && rules[it].action != "KEEP") rules[it].q = item_amount(it);
+	}
+	map_to_file(state, DRIP_STATE_FILE);
+	save_rules(rules);
+	print(tag + "drip: " + listed + " " + (sim ? "would be " : "") + "listed, " + waiting + " waiting out the empty days, " + held + " held back while listed. Rule keep-counts set to what is on hand.", "blue");
 }
 
 void common_guards(string tag) {
@@ -400,9 +499,13 @@ void tidy_run(boolean sim) {
 	// ---- reprice the store to market (once a day), then top up at the resulting prices
 	reprice_store(sim, tag);
 
+	// ---- drip listings: small fixed lots that are allowed to run dry
+	drip_step(rules, shop, sim, tag);
+
 	// ---- store top-ups at your own prices, before Philter can touch those listings
 	int topped = 0; int toppedItems = 0;
 	foreach it, listed in shop {
+		if (DRIP_LIST contains it) continue;
 		if (!(rules contains it) || rules[it].action != "MALL") continue;
 		int excess = item_amount(it) - rules[it].q;
 		if (excess <= 0) continue;

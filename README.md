@@ -84,6 +84,7 @@ Set these in the gCLI with `set name = value`.
 |---|---|---|
 | `tidy_protectAbove` | 10000000 | Listings priced above this are never repriced. |
 | `tidy_priceFactor` | 1.0 | Multiplies the market price when repricing. `0.99` lists 1% under it (10 meat on a 1,000-meat item, 10,000 on a 1,000,000-meat item) so you get the sale first. Floor of 100 meat still applies. |
+| `tidy_priceJitter` | 0 | Random spread around the factor, so your prices are not a fixed pattern a rival can read. `0.01` with factor `0.99` draws a factor between 0.98 and 1.00 per item per day. A listing already inside that band is left alone, so this does not churn your whole store daily. Never above 1.0. |
 | `tidy_rulesSuffix` | (empty) | Testing only. Use `OCDdata_<name><suffix>.txt` instead of your real rules. |
 
 **Keep list.** Create `data/tidy_keep_<yourname>.txt` with one item per line,
@@ -99,6 +100,23 @@ peppermint parasol	1
 **Pin list.** Create `data/tidy_pin_<yourname>.txt` with one item name per
 line. Those listings are never repriced, whatever their price: hand-set prices,
 or items you keep in the mall just to watch the price.
+
+**Drip list (for sellers who care about the market, not just junk).** A
+listing that keeps refilling tells rivals you have depth, and they price against
+you. A small lot that sells out and stays empty for a while looks like you dried
+up, so they leave their prices alone. Create `data/tidy_drip_<yourname>.txt`,
+one item per line: `item name`, tab, how many to list at a time, tab, how many
+days to stay empty before relisting (optional, default 0). tidy lists that many
+only when your store holds none of it and the empty days have passed; while any
+are listed it never adds more, whatever you hold. The rest stays in your
+inventory: tidy sets that rule's keep-count to what you have on hand every run,
+so Philter never lists it either. The fresh lot is priced at the market price
+times your factor (and jitter). Example:
+
+```
+Mr. Accessory	1	3
+pocket wish	5
+```
 
 **About "market price".** KoLmafia deliberately hides the true cheapest listing
 from scripts (it is anti-mallbot policy in mafia itself): the price a script can
