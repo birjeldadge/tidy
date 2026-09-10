@@ -177,7 +177,7 @@ boolean is_tool_type(item it) {
 	return t.contains_text("reusable") || t.contains_text("grow") || t.contains_text("sticker")
 		|| t.contains_text("card") || t.contains_text("folder") || t.contains_text("spur")
 		|| t.contains_text("skin") || t.contains_text("avatar") || t.contains_text("message")
-		|| t.contains_text("zap") || is_restorative(it);
+		|| t.contains_text("zap");
 }
 // How many of a piece of gear you can wear at once: three accessory slots, one of anything else.
 int gear_slots(item it) { return it.to_slot() == $slot[acc1] ? 3 : 1; }
@@ -279,6 +279,7 @@ Decision decide(item it, int n, OCDinfo [item] bale, int [item] shop, boolean [i
 	if (shop contains it) return keep("already in your store: yours to decide");
 	if (display_amount(it) > 0) return keep("also in display case");
 	if (bale contains it && bale[it].action != "MALL" && bale[it].action != "AUTO") return keep("default ruleset says " + bale[it].action);
+	if (is_restorative(it)) return keep("HP/MP restorative, a supply");
 	boolean gear = (it.to_slot() != $slot[none]);
 	if (gear || is_tool_type(it)) {
 		int slots = gear_slots(it);
@@ -287,7 +288,7 @@ Decision decide(item it, int n, OCDinfo [item] bale, int [item] shop, boolean [i
 			if (p <= 100) return keep("duplicate gear at floor, no autosell value");
 			return sell("MALL", slots, "duplicate cheap gear, keep " + slots);
 		}
-		return keep(is_restorative(it) ? "HP/MP restorative, a supply" : "gear/tool");
+		return keep("gear/tool");
 	}
 	if (p <= 0) return keep("no mall price");
 	if (ka > 0 && p >= ka) return keep("worth " + rnum(p) + " each: yours to decide");
