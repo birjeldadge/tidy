@@ -82,7 +82,12 @@ saw the rule. Added after the adversarial review. The hold counts what
 Philter counts, bag + closet + worn (on you or on any familiar in the
 terrarium), and grows to cover copies picked up while
 it lasts; the second review found the first version counted only the bag, so
-Philter could still sell the bag copies when more sat in the closet.
+Philter could still sell the bag copies when more sat in the closet. The hold
+is recorded in `data/tidy_hold_<name>.txt` rather than in the rule's message
+column: Philter Manager writes an empty message for MALL and AUTO rules on
+every save, which erased the marker and left a permanent keep-everything rule
+behind. A keep-count changed by hand on a held rule drops the hold, and the
+hand-set number stands.
 
 **Philter's settings are verified, not assumed.** The `zlib name = value` CLI
 command silently refuses a name it has never seen, and Philter only creates its
@@ -139,7 +144,8 @@ listing, so one seller dumping six cheap units for an afternoon can define
 "market" for a day. Two guards limit the damage: any cut is confirmed with a
 fresh search first (the cheap-listing cache is per session, not per day), and
 no listing is cut by more than `tidy_maxCutPct` (30%) in one day, so a real
-collapse is followed over several days and a fake one costs at most one step.
+collapse is followed over several days and a fake one costs at most one step
+per day it persists.
 
 Defaults: reprice **down only** (`tidy_reprice = down`), never raise a price
 the owner set, never chase a market that collapsed to KoL's floor (100 meat or
@@ -265,8 +271,18 @@ into a live run.
   meat and factor 1.0: a listing given a minimum price of 130 in the rule file
   was cut to 130 instead of to the 126 market; a drip lot was priced at its
   rule's 5,000 minimum; every raise and every cut in the preview stayed inside
-  the 30% daily cap, and the seven listings parked at 999,999,999 were skipped. The reprice-day file and the parked-listing exemption are
-  live-path code, verified by reading.
+  the 30% daily cap, and the seven listings parked at 999,999,999 were skipped.
+  The reprice-day file is live-path code, verified by reading.
+- The hold-record and list items, probed under the test suffix: two rules with
+  the old message-column marker were moved into the hold file on the next run;
+  a hold whose rule had been given a different keep-count by hand was dropped
+  with the hand-set number kept; a hold on a rule turned KEEP was dropped; the
+  due hold was listed, then released by the following preview; a familiar item
+  with keep 0 was reported as "would set keep-N" by the preview and left at 0
+  in the file; an inherited GIFT rule kept its kmail text in the note; a keep
+  list with "cowbell" and a pin list with "seal-clubbing" refused those lines
+  and loaded the exact ones; Philter's simulation switch read `false` again
+  after the previews had set it to `true`.
 
 ## Known limits
 
