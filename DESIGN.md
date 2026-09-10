@@ -128,7 +128,10 @@ Defaults: reprice **down only** (`tidy_reprice = down`), never raise a price
 the owner set, never chase a market that collapsed to the 100 floor, never below
 100 meat, never touch listings above `tidy_protectAbove` (1,000,000). `both`
 follows the market either way; `off` skips repricing. `tidy_priceFactor` under
-1.0 lists under market for people who want the sale first; `tidy_priceJitter`
+1.0 lists under market for people who want the sale first, but only for a
+listing that sits above market: the market figure counts your own units, so
+when you are the cheapest seller it is your own price, and the second review
+showed a 0.99 factor cutting such a listing 1% a day forever; `tidy_priceJitter`
 draws a random factor inside a band per item per day so prices are not a fixed
 pattern a rival can read, and listings already inside the band are left alone
 so the store does not churn daily. A pin list exempts listings entirely.
@@ -181,6 +184,12 @@ overwritten.
   was skipped; a top-up with one copy in the closet sent 2 instead of 1; and a
   control rule with keep 1 on an item with 135 closet copies showed Philter
   selling the bag copy, which is exactly what the fix guards against.
+- The second finding, the self-undercut: with factor 0.99 and the protect
+  threshold set to 150 meat for the probe, 234 of the author's cheap listings
+  qualified for a cut under the old logic and 224 of them sat exactly at market
+  (his own listing was the market); the new logic cut 10, all above market, and
+  left the 224 alone. The preview's counts matched a read-only probe of the
+  same listings.
 
 ## Known limits
 

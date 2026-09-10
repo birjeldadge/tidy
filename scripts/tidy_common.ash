@@ -41,7 +41,9 @@
 //   tidy_holdNewDays    1: a live run writes rules for new item kinds but holds them this many days before they can sell (0 = off).
 //                       Holds, top-ups and drip keep-counts count bag + closet + worn copies, the way Philter does.
 //   tidy_priceFactor    multiply the market price by this when repricing (default 1.0 = match market;
-//                       0.99 = list 1% under the market price to get the sale first; never below 100 meat)
+//                       0.99 = list 1% under the market price to get the sale first; never below 100 meat).
+//                       Applies only to listings above market: one already at or under market is never cut, because
+//                       the market figure counts your own units and cutting there would chase your own price down daily.
 //   tidy_priceJitter    random spread around the factor (default 0). 0.01 with factor 0.99 draws a factor
 //                       between 0.98 and 1.00 per item per day; a listing already inside that band is left alone.
 //   tidy_rulesSuffix    testing only: use OCDdata_<name><suffix>.txt instead of your real rules
@@ -383,7 +385,7 @@ void reprice_store(boolean sim, string tag) {
 	int limit = protect_above();
 	float factor = price_factor();
 	int [item] shop = get_shop();
-	int changed = 0; int same = 0; int protectedCount = 0; int noPrice = 0; int pinned = 0; int wouldRaise = 0; int atFloor = 0; int capped = 0; int failed = 0;
+	int changed = 0; int same = 0; int protectedCount = 0; int noPrice = 0; int pinned = 0; int wouldRaise = 0; int atFloor = 0; int atMarket = 0; int capped = 0; int failed = 0;
 	int cutPct = max_cut_pct();
 	foreach it, n in shop {
 		if (PIN_LIST contains it) { pinned += 1; continue; }
@@ -402,6 +404,9 @@ void reprice_store(boolean sim, string tag) {
 		int newp = target_price(mkt);
 		if (newp == cur) { same += 1; continue; }
 		if (mode == "down" && newp > cur) { wouldRaise += 1; continue; }   // never raise a price you set
+		// Never cut a listing that is already at or under market. The market figure counts your own units, so when
+		// you are the cheapest seller it IS your price, and a factor under 1.0 would cut you under yourself every day.
+		if (newp < cur && cur <= mkt) { atMarket += 1; continue; }
 		int floorToday = cur - (cur * cutPct / 100);   // no more than tidy_maxCutPct off in one day
 		if (newp < floorToday) { newp = floorToday < 100 ? 100 : floorToday; capped += 1; }
 		if (newp == cur) { same += 1; continue; }
@@ -417,6 +422,7 @@ void reprice_store(boolean sim, string tag) {
 	print(tag + (sim ? "would reprice " : "repriced ") + changed + " listing" + (changed == 1 ? "" : "s") + " to market" + how + "; " + same + " already there; " + protectedCount + " left alone (" + (limit > 0 ? "over " + rnum(limit) + " meat" : "protect threshold off") + "); " + pinned + " pinned; " + noPrice + " with no market price.", "blue");
 	if (mode == "down" && (wouldRaise > 0 || atFloor > 0))
 		print(tag + wouldRaise + " below market and left there (tidy never raises your prices); " + atFloor + " with a market at the 100-meat floor, not chased. Set tidy_reprice = both to change that.", "blue");
+	if (atMarket > 0) print(tag + atMarket + " already at or under market and left there (a price factor only applies to listings above market, so you never chase your own price down).", "blue");
 }
 
 // Drip listings: list a fixed count only when the store holds none (and it has been empty long
