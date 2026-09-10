@@ -1,5 +1,8 @@
-# per-character rule files, keep lists and previews never belong in the repo
-data/
+# per-character rule files, keep lists, previews and drip state never belong in the repo
+data/OCDdata_*
+data/tidy_keep_*
+data/tidy_pin_*
+data/tidy_drip_*
 OCDdata_*.txt
 tidy_keep_*.txt
 *.prev.txt

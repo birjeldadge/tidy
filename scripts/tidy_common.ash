@@ -162,12 +162,22 @@ int sale_price(item it) {
 	return mall_price(it);
 }
 
+// HP/MP restoratives are supplies, not junk. Mafia knows them (data/restores.txt inside the jar) but
+// scripts cannot read the jar, so tidy ships a copy as data/tidy_restores.txt (item name, tab, hp|mp|both).
+string [string] load_restores() {
+	string [string] r;
+	file_to_map("tidy_restores.txt", r);
+	return r;
+}
+string [string] RESTORES = load_restores();
+boolean is_restorative(item it) { return RESTORES contains it.name; }
+
 boolean is_tool_type(item it) {
 	string t = item_type(it);
 	return t.contains_text("reusable") || t.contains_text("grow") || t.contains_text("sticker")
 		|| t.contains_text("card") || t.contains_text("folder") || t.contains_text("spur")
 		|| t.contains_text("skin") || t.contains_text("avatar") || t.contains_text("message")
-		|| t.contains_text("zap") || t.contains_text("restore");   // hp/mp restoratives are supplies, not junk
+		|| t.contains_text("zap") || is_restorative(it);
 }
 // How many of a piece of gear you can wear at once: three accessory slots, one of anything else.
 int gear_slots(item it) { return it.to_slot() == $slot[acc1] ? 3 : 1; }
@@ -277,7 +287,7 @@ Decision decide(item it, int n, OCDinfo [item] bale, int [item] shop, boolean [i
 			if (p <= 100) return keep("duplicate gear at floor, no autosell value");
 			return sell("MALL", slots, "duplicate cheap gear, keep " + slots);
 		}
-		return keep("gear/tool");
+		return keep(is_restorative(it) ? "HP/MP restorative, a supply" : "gear/tool");
 	}
 	if (p <= 0) return keep("no mall price");
 	if (ka > 0 && p >= ka) return keep("worth " + rnum(p) + " each: yours to decide");

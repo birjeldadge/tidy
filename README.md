@@ -84,7 +84,7 @@ For an item with no rule yet, in this order:
 - Already in your mall store: **KEEP** (you priced it; you decide whether tidy tops it up. Change the rule to MALL and it will, at your price).
 - Also in your display case: **KEEP**.
 - Philter's default ruleset says something other than sell: **KEEP**.
-- Gear, a reusable tool, or an HP/MP restorative: **KEEP**. Cheap duplicate gear (under 10,000 meat, more than you can wear): keep what you can wear, sell the rest.
+- Gear, a reusable tool, or an HP/MP restorative (mafia's own list, shipped as `data/tidy_restores.txt`): **KEEP**. Cheap duplicate gear (under 10,000 meat, more than you can wear): keep what you can wear, sell the rest.
 - Worth `tidy_keepAbove` (default 10,000 meat) or more per copy, any count: **KEEP**. Valuable stock is yours to decide.
 - Mall price at the 100-meat floor: **AUTO** (autosell) if it has an autosell value, else KEEP.
 - Everything else: **MALL**.

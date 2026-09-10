@@ -1,0 +1,148 @@
+# HP/MP restorative items, copied from KoLmafia's data/restores.txt (KoLmafia-29246.jar).
+# tidy keeps these instead of selling them (they are supplies, not junk). item name<TAB>hp|mp|both.
+# Scripts cannot read the jar's copy, so tidy ships this snapshot. Add lines if mafia gains new ones.
+ancient Magi-Wipes	both
+ancient pills	mp
+ancient turtle shell powder	hp
+aspirin	hp
+bag of pygmy blood	hp
+banana spritzer	mp
+battery (9-Volt)	mp
+battery (AA)	mp
+battery (AAA)	mp
+battery (car)	mp
+battery (D)	mp
+battery (lantern)	mp
+beer-scented teddy bear	mp
+black cherry soda	mp
+Blatantly Canadian	mp
+blue paisley oyster egg	mp
+blue pixel potion	mp
+blue polka-dot oyster egg	mp
+blue potion	mp
+blue striped oyster egg	mp
+bottle of Monsieur Bubble	mp
+bottle of Vangoghbitussin	both
+bubblegum heart	hp
+Camp Scout pup tent	hp
+can of CRIMBCOLA	mp
+carbonated soy milk	mp
+carbonated water lily	mp
+cartoon heart	hp
+cast	hp
+Cherry Cloaca Cola	mp
+Cloaca Cola Polar	mp
+Cloaca-Cola	mp
+comfy pillow	hp
+cotton bandages	hp
+cotton candy bale	both
+cotton candy cone	both
+cotton candy pillow	both
+cotton candy pinch	both
+cotton candy plug	both
+cotton candy skoshe	both
+cotton candy smidgen	both
+creepy ginger ale	mp
+CSA all-purpose soap	mp
+cup of hickory chicory	mp
+delicious shimmering moth	mp
+deluxe mushroom	hp
+Diet Cloaca Cola	mp
+Doc Galaktik's Ailment Ointment	hp
+Doc Galaktik's Homeopathic Elixir	hp
+Doc Galaktik's Invigorating Tonic	mp
+Doc Galaktik's Pungent Unguent	hp
+Doc Galaktik's Restorative Balm	hp
+dueling turtle	both
+Dyspepsi-Cola	mp
+elven magi-pack	mp
+elven medi-pack	hp
+eternal car battery	mp
+extra-strength red potion	hp
+fancy blue potion	mp
+filthy poultice	hp
+forest tears	hp
+furry pill	hp
+gauze garter	hp
+generic healing potion	hp
+generic mana potion	mp
+generic restorative potion	both
+gold star	mp
+goodberry	hp
+green pixel potion	both
+grogpagne	mp
+heart of dark chocolate	hp
+high-pressure seltzer bottle	mp
+holy spring water	mp
+honey-dipped locust	both
+Knob Goblin seltzer	mp
+Knob Goblin superseltzer	mp
+linen bandages	hp
+magical mystery juice	mp
+magical sausage	mp
+magnolia blossom	both
+Marquis de Poivre soda	mp
+Medicinal Herb's medicinal herbs	hp
+Mer-kin fitbrine	both
+Monstar energy beverage	mp
+Mountain Stream Code Black Alert	mp
+Mountain Stream soda	mp
+mushroom	hp
+myrrh-soaked, chocolate-covered bacon bath ball	mp
+Nardz energy beverage	mp
+natural fennel soda	mp
+New Cloaca-Cola	mp
+Notes from the Elfpocalypse, Chapter I	both
+Notes from the Elfpocalypse, Chapter II	both
+Notes from the Elfpocalypse, Chapter III	both
+Notes from the Elfpocalypse, Chapter IV	both
+Notes from the Elfpocalypse, Chapter V	both
+Notes from the Elfpocalypse, Chapter VI	both
+Okee-Dokee soda	mp
+Oscus's neverending soda	mp
+palm-frond fan	both
+personal massager	hp
+phonics down	both
+pixel energy tank	both
+pixel orb	both
+pixellated candy heart	hp
+plaid bandage	hp
+Platinum Yendorian Express Card	mp
+plump juicy grub	hp
+Pok&euml;mann band-aid	hp
+potion of healing	both
+psychokinetic energy blob	mp
+really thick bandage	hp
+red paisley oyster egg	hp
+red pixel potion	hp
+red polka-dot oyster egg	hp
+red potion	hp
+red striped oyster egg	hp
+Regular Cloaca Cola	mp
+sacramental wine	mp
+sanctified cola	mp
+scented massage oil	hp
+scroll of drastic healing	hp
+sea gel	hp
+sew-on bandage	hp
+sewing kit	hp
+silk bandages	hp
+soda water	mp
+sparking robo-battery	mp
+spirit beer	mp
+sugar shard	both
+super deluxe mushroom	hp
+Texas tea	both
+tiny house	both
+tonic water	mp
+tube of herbal ointment	hp
+ultracoagulator	other
+unrefined Mountain Stream syrup	mp
+warm El Vibrato drone	hp
+wasabi marble soda	mp
+waterlogged scroll of healing	hp
+whimpering willow bark	hp
+Wint-O-Fresh mint	mp
+Wolfman Nardz	mp
+Yeg's Motel sewing kit	hp
+your own black heart	both
