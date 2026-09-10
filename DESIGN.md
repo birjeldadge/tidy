@@ -160,7 +160,11 @@ Neither sells anything. A rule file that exists but does not parse is never
 overwritten, and the `.prev` copy is taken after that check, not before: the
 second review found the old order let the very file the check catches destroy
 the last good backup, after which revert swapped broken for broken. Revert now
-refuses a copy that holds no readable rules.
+refuses a copy that holds no readable rules. The dated backup is the revert
+target only until the first live run on the fresh rules (after that, revert
+undoes the last run), and any revert asks for a fresh preview before the next
+`tidy go`, so a rule file resurrected weeks later can never be chained straight
+into a live run.
 
 ## What has been tested
 
@@ -202,6 +206,13 @@ refuses a copy that holds no readable rules.
   revert` refused a mangled `.prev` and changed neither file; a file with one
   tab-less line, one unknown item and one duplicated item stopped before any
   write, both files unchanged; a good file still previewed and reverted.
+- The review's quick wins, probed the same way: `tidy_holdNewDays` set to
+  `-1`, `1,000` and a 20-digit number each stopped the run with the setting
+  named, and `2` ran; `tidy revert` printed its new notice and cleared the
+  preview flag; the closet preview still runs and leaves exactly one `.prev`.
+  The closet live gate (a plain preview is now required before the closet is
+  emptied) and the 999,999,999,999 unknown-price sentinel were verified by
+  reading the code and mafia's source, not by a live run.
 
 ## Known limits
 
