@@ -284,7 +284,9 @@ void check_rule_file(OCDinfo [item] rules, string tag) {
 		if (tab < 0) { noTab += 1; if (first == "") first = line; continue; }
 		if (line.substring(0, tab).to_item() == $item[none]) { unknown += 1; if (first == "") first = line; }
 	}
-	int dup = lines - noTab - unknown - count(rules);
+	// file_to_map files an unknown item under $item[none], one key however many such lines there are
+	int known = count(rules) - ((rules contains $item[none]) ? 1 : 0);
+	int dup = lines - noTab - unknown - known;
 	if (noTab == 0 && unknown == 0 && dup <= 0) return;
 	string why = "";
 	if (noTab > 0) why += noTab + " line" + (noTab == 1 ? " has" : "s have") + " no tab in " + (noTab == 1 ? "it" : "them") + " (an editor that turns tabs into spaces?); ";
