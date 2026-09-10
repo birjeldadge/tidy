@@ -33,6 +33,8 @@
 //   tidy_keepAbove      new item kinds priced at or above this each start as KEEP, whatever the count (unset = 10000; 0 = off)
 //   tidy_reprice        down (default: never raise a price, never chase a market that collapsed to the floor) | both | off
 //   tidy_protectAbove   listings priced above this are never repriced (unset = 1000000; 0 = off, reprice everything)
+//   tidy_junkBelow      off (default): the lazyman rule. Set to e.g. 1000 and new item kinds with a mall price at or
+//                       below that and an autosell value start as AUTO, gear and consumables included. Protected classes still win.
 //   tidy_sellConsumables false (default): potions (usable, grants an effect), food, booze, spleen items with no rule start as KEEP
 //   tidy_allowGiving    false (default): rules that say CLAN (clan stash) or GIFT (kmail) are turned into KEEP every run
 //   tidy_priceFactor    multiply the market price by this when repricing (default 1.0 = match market;
@@ -89,6 +91,13 @@ int keep_above() {
 	if (s == "") return 10000;
 	int p = s.to_int();
 	return p > 0 ? p : 0;
+}
+// The lazyman rule. Off unless set above 100. When on, any new item kind with a mall price at or
+// below this and an autosell value starts as AUTO, gear and consumables included. Outfit pieces,
+// keep-list items, store and display-case items, restoratives and untradeables stay protected.
+int junk_below() {
+	int j = get_property("tidy_junkBelow").to_int();
+	return j > 100 ? j : 0;
 }
 // While false (default), potions, food, booze and spleen items with no rule start as KEEP.
 boolean sell_consumables() { return get_property("tidy_sellConsumables") == "true"; }
@@ -286,6 +295,8 @@ Decision decide(item it, int n, OCDinfo [item] bale, int [item] shop, boolean [i
 	if (display_amount(it) > 0) return keep("also in display case");
 	if (bale contains it && bale[it].action != "MALL" && bale[it].action != "AUTO") return keep("default ruleset says " + bale[it].action);
 	if (is_restorative(it)) return keep("HP/MP restorative, a supply");
+	int jb = junk_below();
+	if (jb > 0 && p > 0 && p <= jb && autosell_price(it) >= 1) return sell("AUTO", 0, "lazyman rule: mall " + rnum(p) + " is under " + rnum(jb) + ", autosell");
 	if (!sell_consumables() && is_consumable(it)) return keep("consumable: yours to decide (tidy_sellConsumables = true to sell these)");
 	boolean gear = (it.to_slot() != $slot[none]);
 	if (gear || is_tool_type(it)) {
@@ -524,6 +535,7 @@ void tidy_help() {
 	h_cmd("tidy_protectAbove", (protect_above() > 0 ? rnum(protect_above()) : "off") + " - listings priced above this are never repriced (0 = off, unset = 1,000,000)");
 	h_cmd("tidy_priceFactor", price_factor() + " - multiply the market price when repricing (1.0 = match, 0.99 = 1% under)");
 	h_cmd("tidy_priceJitter", price_jitter() + " - random spread around the factor, per item per day (0 = off)");
+	h_cmd("tidy_junkBelow", (junk_below() > 0 ? rnum(junk_below()) : "off") + " - the lazyman rule: new item kinds worth this much or less each, with an autosell value, start as AUTO, gear and consumables included (set above 100 to turn on)");
 	h_cmd("tidy_sellConsumables", (sell_consumables() ? "true" : "false") + " - false = potions, food, booze and spleen items with no rule start as KEEP");
 	h_cmd("tidy_allowGiving", (get_property("tidy_allowGiving") == "true" ? "true" : "false") + " - false = old CLAN/GIFT rules (clan stash, kmail) are turned into KEEP");
 	h_section("Files in data/ (all optional)");
