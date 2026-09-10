@@ -42,8 +42,10 @@ each new item rather than a blanket answer.
 7. Daily reprice of the store (see pricing).
 8. Drip listings (see below).
 9. Top-ups: for MALL rules on items already in the store, everything above the
-   keep-count, counted the way Philter counts (bag + closet + worn), goes in at
-   your existing price, so Philter finds nothing to move for those items.
+   keep-count, counted the way Philter counts (bag + closet + worn, terrarium
+   included), goes in at your existing price; copies Philter would have fetched
+   off familiars (or out of the closet, when mafia may use it) are fetched
+   first, so Philter finds nothing to move for those items.
 10. Philter, in simulation for a preview or live for `tidy go`.
 
 Every run keeps the version it started from as `.prev`, taken only after the
@@ -66,7 +68,8 @@ new item kind writes the generator's rule but holds everything on hand for
 `tidy_holdNewDays` (default 1). The next run releases it. So a spoofed or
 transient market price can never turn a new item into a sale before a human had
 a day to see the rule. Added after the adversarial review. The hold counts what
-Philter counts, bag + closet + worn, and grows to cover copies picked up while
+Philter counts, bag + closet + worn (on you or on any familiar in the
+terrarium), and grows to cover copies picked up while
 it lasts; the second review found the first version counted only the bag, so
 Philter could still sell the bag copies when more sat in the closet.
 
@@ -213,11 +216,27 @@ into a live run.
   The closet live gate (a plain preview is now required before the closet is
   emptied) and the 999,999,999,999 unknown-price sentinel were verified by
   reading the code and mafia's source, not by a live run.
+- Third review, first finding: Philter's count includes equipment on benched
+  familiars (mafia's accessible count adds every familiar's equipment), and its
+  cleanup fetches those copies off the familiars before selling, even in
+  simulation: a simulated run on the author's account printed "Unequip Angry
+  Goat / Leprechaun / Levitating Potato". Probed with a familiar item worn by
+  four benched familiars: a held rule's keep-count rose from 12 (the bag) to
+  16; a keep-1 top-up planned 15 copies with 3 fetched off familiars first; the
+  fetch helper, run live, took the copies off and returned the active familiar
+  with its own gear untouched.
 
 ## Known limits
 
-- Needs KoLmafia r26597 or newer (git installs with a `manifest.json` root, which
-  is how Philter installs as a dependency).
+- Needs KoLmafia r27250 or newer (`equipped_amount(item, true)`, which counts
+  equipment on every familiar; git installs with a `manifest.json` root, which
+  is how Philter installs as a dependency, came earlier).
+- Philter's simulation is not free of side effects: when a rule's keep-count is
+  below the number of copies on your familiars, Philter's cleanup fetches them
+  into your bag before it checks the simulation switch, so a tidy preview can
+  move familiar equipment into your bag. Nothing is sold.
+- Philter also counts items installed in your campground; tidy does not.
+  Nothing tidy writes rules for lives there in practice.
 - Restoratives come from a snapshot of mafia's `restores.txt`; new restoratives
   need a line added.
 - The 5th-cheapest price is the only market signal a script can see.

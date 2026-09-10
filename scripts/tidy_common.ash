@@ -57,7 +57,7 @@
 //   top up while any are listed; the rest stays in inventory (tidy sets the rule's keep-count to match).
 //   Rivals see a small stock that runs dry, not a deep one, so they price against you less.
 
-since r26597;   // git checkout honours manifest.json root_directory (needed to install Philter automatically)
+since r27250;   // equipped_amount(item, true) counts equipment on every familiar; also past r26597, where git checkout honours manifest.json (Philter installs as a dependency)
 
 import "zlib.ash";
 
@@ -253,7 +253,25 @@ int protect_min(item it, boolean [item] pieces) {
 	if (is_protected_gear(it, pieces)) return gear_slots(it);
 	return 0;
 }
-int on_hand(item it) { return item_amount(it) + closet_amount(it) + equipped_amount(it); }
+// What Philter measures a keep-count against: bag + closet + worn, where "worn" includes equipment on every familiar in
+// the terrarium, not just the active one (mafia's accessible count adds getEquippedCount(item, true)). Items installed
+// in the campground also count for Philter and are not counted here; nothing tidy writes rules for lives there.
+int on_hand(item it) { return item_amount(it) + closet_amount(it) + equipped_amount(it, true); }
+
+// Take copies of a familiar item off the familiars wearing it, as Philter's own fetch would, so they can be listed at
+// your price. The active familiar is switched back afterwards (its item, if taken, stays off, exactly as Philter leaves it).
+int unequip_from_familiars(item it, int need) {
+	if (need <= 0 || it.to_slot() != $slot[familiar]) return 0;
+	familiar orig = my_familiar(); int got = 0;
+	foreach f in $familiars[] {
+		if (got >= need) break;
+		if (f == $familiar[none] || !have_familiar(f) || familiar_equipped_equipment(f) != it) continue;
+		if (!use_familiar(f)) continue;
+		if (equip($slot[familiar], $item[none])) got += 1;
+	}
+	if (orig != $familiar[none] && my_familiar() != orig) use_familiar(orig);
+	return got;
+}
 
 string rule_line(item it, string action, int q, string info, string message) {
 	return "[" + it.to_int() + "]" + it.name + "\t" + action + "\t" + q + "\t" + info + "\t" + message + "\n";
@@ -821,19 +839,35 @@ void tidy_run(boolean sim) {
 	foreach it, listed in shop {
 		if (DRIP_LIST contains it) continue;
 		if (!(rules contains it) || rules[it].action != "MALL") continue;
-		// Philter's excess is (bag + closet + worn) - keep-count, taken from the bag. Top up exactly that, or Philter
-		// finds a remainder and re-lists it at market, which KoL applies to the whole listing (your price is gone).
-		int excess = min(item_amount(it), on_hand(it) - rules[it].q);
-		if (excess <= 0) continue;
+		// Philter's excess is (bag + closet + worn) - keep-count. It takes that from the bag and fetches the rest itself: off
+		// any familiar wearing the item, and out of the closet when mafia's autoSatisfyWithCloset is on. Whatever it fetches
+		// it lists at market, which KoL applies to the whole listing (your price is gone). So fetch first, then top up.
+		int wanted = on_hand(it) - rules[it].q;
+		if (wanted <= 0) continue;
 		int price = shop_price(it);
 		// KoLmafia's "price unknown" value is 999,999,999,999 (StoreManager); a listing parked at 999,999,999 is a real price
 		if (price <= 0 || price >= 999999999999) abort(tag + "could not read your store price for " + it + " (mafia returned " + price + "). Stopping before Philter so the listing cannot be repriced. Run 'refresh shop' and try again.");
+		int fetch = wanted - item_amount(it);
+		int fromCloset = 0; int fromFamiliars = 0;
+		if (fetch > 0) {
+			if (get_property("autoSatisfyWithCloset") == "true") fromCloset = min(fetch, closet_amount(it));
+			fromFamiliars = min(fetch - fromCloset, equipped_amount(it, true));
+			if (!sim) {
+				if (fromCloset > 0 && !take_closet(fromCloset, it)) abort(tag + "could not take " + it + " out of the closet. Stopping before Philter so the listing cannot be repriced.");
+				int got = unequip_from_familiars(it, fromFamiliars);
+				if (got < fromFamiliars) print(tag + "could only take " + got + " of " + fromFamiliars + " " + it + " off your familiars; Philter may fetch the rest and re-list it at market.", "red");
+				fromFamiliars = got;
+			}
+		}
+		int excess = min(wanted, item_amount(it) + (sim ? fromCloset + fromFamiliars : 0));
+		if (excess <= 0) continue;
+		string fetched = (fromCloset + fromFamiliars > 0) ? " (" + (fromFamiliars > 0 ? fromFamiliars + " off your familiars" : "") + (fromCloset > 0 && fromFamiliars > 0 ? ", " : "") + (fromCloset > 0 ? fromCloset + " out of the closet" : "") + " first, as Philter would have)" : "";
 		topped += 1; toppedItems += excess;
-		if (sim) print("  would add " + excess + " " + it + " to your store at your price of " + rnum(price), "black");
+		if (sim) print("  would add " + excess + " " + it + " to your store at your price of " + rnum(price) + fetched, "black");
 		else {
 			if (!put_shop(price, shop_limit(it), excess, it))
 				abort(tag + "could not add " + it + " to your store. Stopping before Philter so the listing cannot be repriced.");
-			print("  added " + excess + " " + it + " to your store at your price of " + rnum(price), "black");
+			print("  added " + excess + " " + it + " to your store at your price of " + rnum(price) + fetched, "black");
 		}
 	}
 	if (topped > 0) print(tag + (sim ? "would top up " : "topped up ") + topped + " listing" + (topped == 1 ? "" : "s") + " (" + toppedItems + " items) at your prices.", "blue");
