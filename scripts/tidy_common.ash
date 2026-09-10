@@ -515,7 +515,7 @@ void tidy_help() {
 	h_cmd("tidy go", "LIVE: new rules, store top-ups at your prices, daily reprice, then Philter");
 	h_cmd("tidycloset", "preview: rules for closet items that lack one, then a tally; moves nothing");
 	h_cmd("tidycloset go", "LIVE, one-off: empties the closet into inventory and runs the tidy pipeline");
-	h_cmd("tidy reset", "clean sweep: backs up your rule file, then writes fresh rules for everything you hold (sells nothing)");
+	h_cmd("tidy reset", "clean sweep: backs up your rule file, then writes fresh rules for every item kind in your inventory (sells nothing)");
 	h_cmd("tidy revert", "undo the last change tidy made to your rule file (after a reset, restores the backup; otherwise swaps in the .prev copy)");
 	h_cmd("tidy help", "this text. Any other word prints it too and does nothing else");
 	h_section("Settings (set name = value)");
