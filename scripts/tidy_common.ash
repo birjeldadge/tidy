@@ -483,28 +483,32 @@ void tidy_closet_run(boolean sim) {
 	print(tag + "done. Closet now holds " + count(get_closet()) + " kinds.", "blue");
 }
 
+// Help is printed as HTML: the gCLI collapses tabs and runs of spaces, so bold and colour do the layout.
+void h_section(string s) { print_html("<font color='#1f6fb2'><b>" + s + "</b></font>"); }
+void h_cmd(string cmd, string text) { print_html("<b>" + cmd + "</b> - " + text); }
 void tidy_help() {
-	print("tidy: inventory cleanup on top of Philter. Nothing runs live without the word go.", "blue");
-	print("  tidy             preview: writes rules for new item kinds, shows what a live run would do, sells nothing", "black");
-	print("  tidy go          live: new rules, store top-ups at your prices, daily reprice, then Philter", "black");
-	print("  tidycloset       preview: rules for closet items that lack one, then a tally; moves nothing", "black");
-	print("  tidycloset go    live, one-off: empties the closet into inventory and runs the tidy pipeline", "black");
-	print("  tidy reset       clean sweep: backs up your rule file, then writes fresh rules for everything you hold (sells nothing)", "black");
-	print("  tidy revert      undo the last change tidy made to your rule file (swaps in the .prev copy; run again to swap back)", "black");
-	print("  tidy help        this text (any other word does the same and nothing else)", "black");
-	print("Settings (set name = value):", "blue");
-	print("  tidy_keepAbove     " + (keep_above() > 0 ? rnum(keep_above()) : "off") + "   new item kinds worth this much each start as KEEP, whatever the count (0 = off)", "black");
-	print("  tidy_reprice       " + reprice_mode() + "   down = never raise, never chase a floor; both = follow market either way; off", "black");
-	print("  tidy_protectAbove  " + (protect_above() > 0 ? rnum(protect_above()) : "off") + "   listings priced above this are never repriced (0 = off, unset = 1,000,000)", "black");
-	print("  tidy_priceFactor   " + price_factor() + "   multiply the market price when repricing (1.0 = match, 0.99 = 1% under)", "black");
-	print("  tidy_priceJitter   " + price_jitter() + "   random spread around the factor, per item per day (0 = off)", "black");
-	print("  tidy_allowGiving   " + (get_property("tidy_allowGiving") == "true" ? "true" : "false") + "   false = old CLAN/GIFT rules (clan stash, kmail) are turned into KEEP", "black");
-	print("Files in data/ (all optional):", "blue");
-	print("  " + RULES_FILE + "   your rules (edit in Philter Manager)", "black");
-	print("  " + KEEP_FILE + "   item<TAB>count: always keep that many on hand   (" + count(KEEP_LIST) + " loaded)", "black");
-	print("  " + PIN_FILE + "   item per line: never reprice these listings   (" + count(PIN_LIST) + " loaded)", "black");
-	print("  " + DRIP_FILE + "   item<TAB>count<TAB>days: small lots that run dry before relisting   (" + count(DRIP_LIST) + " loaded)", "black");
-	print("Rules of the road: whitelist only (no rule, no action); aftercore only; Hagnk's must be emptied; the 100-meat floor always holds.", "olive");
+	print_html("<font color='#1f6fb2'><b>tidy</b> - inventory cleanup on top of Philter. Nothing runs live without the word <b>go</b>.</font>");
+	h_section("Commands");
+	h_cmd("tidy", "preview: writes rules for new item kinds, shows what a live run would do, sells nothing (also: tidy sim)");
+	h_cmd("tidy go", "LIVE: new rules, store top-ups at your prices, daily reprice, then Philter");
+	h_cmd("tidycloset", "preview: rules for closet items that lack one, then a tally; moves nothing");
+	h_cmd("tidycloset go", "LIVE, one-off: empties the closet into inventory and runs the tidy pipeline");
+	h_cmd("tidy reset", "clean sweep: backs up your rule file, then writes fresh rules for everything you hold (sells nothing)");
+	h_cmd("tidy revert", "undo the last change tidy made to your rule file (after a reset, restores the backup; otherwise swaps in the .prev copy)");
+	h_cmd("tidy help", "this text. Any other word prints it too and does nothing else");
+	h_section("Settings (set name = value)");
+	h_cmd("tidy_keepAbove", (keep_above() > 0 ? rnum(keep_above()) : "off") + " - new item kinds worth this much each start as KEEP, whatever the count (0 = off)");
+	h_cmd("tidy_reprice", reprice_mode() + " - down = never raise, never chase a floor; both = follow market either way; off = never reprice");
+	h_cmd("tidy_protectAbove", (protect_above() > 0 ? rnum(protect_above()) : "off") + " - listings priced above this are never repriced (0 = off, unset = 1,000,000)");
+	h_cmd("tidy_priceFactor", price_factor() + " - multiply the market price when repricing (1.0 = match, 0.99 = 1% under)");
+	h_cmd("tidy_priceJitter", price_jitter() + " - random spread around the factor, per item per day (0 = off)");
+	h_cmd("tidy_allowGiving", (get_property("tidy_allowGiving") == "true" ? "true" : "false") + " - false = old CLAN/GIFT rules (clan stash, kmail) are turned into KEEP");
+	h_section("Files in data/ (all optional)");
+	h_cmd(RULES_FILE, "your rules (edit in Philter Manager)");
+	h_cmd(KEEP_FILE, "item, tab, count: always keep that many on hand (" + count(KEEP_LIST) + " loaded)");
+	h_cmd(PIN_FILE, "one item per line: never reprice these listings (" + count(PIN_LIST) + " loaded)");
+	h_cmd(DRIP_FILE, "item, tab, count, tab, days: small lots that run dry before relisting (" + count(DRIP_LIST) + " loaded)");
+	print_html("<font color='olive'>Rules of the road: whitelist only (no rule, no action); aftercore only; Hagnk's must be emptied; the 100-meat floor always holds.</font>");
 }
 
 // Clean sweep: back the rule file up, empty it, and run the first-run preview again (nothing sold).
