@@ -46,9 +46,12 @@ each new item rather than a blanket answer.
    your existing price, so Philter finds nothing to move for those items.
 10. Philter, in simulation for a preview or live for `tidy go`.
 
-Every write to the rule file keeps the previous version as `.prev`, and the file
-is always rewritten in canonical five-column form because Philter's loader
-throws on a rule line that lost its trailing columns.
+Every run keeps the version it started from as `.prev`, taken only after the
+file has been parsed and checked, and the file is always rewritten in canonical
+five-column form because Philter's loader throws on a rule line that lost its
+trailing columns. Because that rewrite comes from the parsed map, any line the
+parser skipped would vanish, so a run stops if a non-comment line has no tab,
+names an item this KoLmafia does not know, or repeats an item.
 
 ## The safety model
 
@@ -154,7 +157,10 @@ preview; `tidy go` is then refused until the owner has run a plain preview and
 looked. `tidy revert` restores that backup, or otherwise swaps in the `.prev`
 copy, which every run takes once at its start so a revert undoes the whole run.
 Neither sells anything. A rule file that exists but does not parse is never
-overwritten.
+overwritten, and the `.prev` copy is taken after that check, not before: the
+second review found the old order let the very file the check catches destroy
+the last good backup, after which revert swapped broken for broken. Revert now
+refuses a copy that holds no readable rules.
 
 ## What has been tested
 
@@ -190,6 +196,12 @@ overwritten.
   (his own listing was the market); the new logic cut 10, all above market, and
   left the 224 alone. The preview's counts matched a read-only probe of the
   same listings.
+- The third finding, the backup order, probed with copies of the author's
+  803-rule file under the test suffix: a fully mangled file (tabs to spaces)
+  stopped the run and left `.prev` byte-identical to the good copy; `tidy
+  revert` refused a mangled `.prev` and changed neither file; a file with one
+  tab-less line, one unknown item and one duplicated item stopped before any
+  write, both files unchanged; a good file still previewed and reverted.
 
 ## Known limits
 

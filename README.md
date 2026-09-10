@@ -35,7 +35,7 @@ Nothing runs live without the word `go`.
 | `tidy go` | Live. Rules for new item kinds, keep-count check, daily reprice, drip listings, store top-ups at your prices, then Philter. Refuses until a preview has been run at least once. |
 | `tidy help` | Prints the commands, your current settings, and which optional files are loaded. Does nothing else. Any other word does the same, after naming the word it did not understand. |
 | `tidy reset` | Clean sweep. Backs up your rule file as `OCDdata_<name>.before-reset-<date>-<time>.txt`, then runs the first-run preview: a fresh rule for every item kind in your inventory, nothing sold. `tidy go` is refused until you have run a plain `tidy` and looked. For people who picked up Philter years ago and cannot remember what they decided. |
-| `tidy revert` | Undo. Right after a reset it restores the dated backup. Otherwise it swaps in the `.prev` copy that every rule-file write leaves behind; run it again to swap back. Never sells anything. |
+| `tidy revert` | Undo. Right after a reset it restores the dated backup. Otherwise it swaps in the `.prev` copy that every rule-file write leaves behind; run it again to swap back. Refuses a copy that holds no readable rules. Never sells anything. |
 | `tidycloset` | Preview. Writes rules for closet items that have none, then tallies. Moves nothing. |
 | `tidycloset go` | Live, one-off. Empties the closet into inventory and runs the tidy pipeline. Refuses unless the preview ran the same day. |
 
@@ -126,8 +126,8 @@ It never changes the action you chose on any other rule. Sort by price in
 Philter Manager, set PULV, AUTO, MALL or KEEP however you like, and `tidy go`
 will honour it every day after. The whole file is rewritten in a clean
 five-column form on each save (some editors strip trailing tabs, which crashes
-Philter's loader). A copy of the file as it was at the start of the run is kept
-as `.prev`, so `tidy revert` undoes the whole run.
+Philter's loader). A copy of the file as it was at the start of the run (taken after it has been
+read and checked) is kept as `.prev`, so `tidy revert` undoes the whole run.
 
 ## The lazyman rule (`tidy_junkBelow`), explained fully
 
@@ -232,13 +232,18 @@ listing repriced by Philter. Found by a second adversarial review of the merged
 fixes; all three counts now match Philter's. The same review found that a
 `tidy_priceFactor` under 1.0 cut a listing that was itself the cheapest on the
 market 1% under its own price every day; a listing at or under market is now
-never cut.
+never cut. And it found that the `.prev` copy was taken before the file was
+checked, so the one file the check exists to catch (a rule file saved by an
+editor that turned tabs into spaces) overwrote the good backup, and `tidy
+revert` then swapped broken for broken. The copy is now taken after the check,
+and revert refuses an unreadable copy.
 
 - Aftercore only (refuses in Ronin or Hardcore).
 - Refuses until Hagnk's has been emptied this ascension (`pull all`).
 - Forces Philter's `BaleOCD_EmptyCloset` to -1 so Philter never dumps your closet on its own.
-- Every run first copies your rule file to `OCDdata_<name>.prev.txt`.
-- A rule file that exists but does not parse is never overwritten; tidy stops and tells you.
+- Every run copies your rule file to `OCDdata_<name>.prev.txt`, but only after it has been read and checked, so a broken file never overwrites the last good copy.
+- A rule file that exists but does not parse is never overwritten; tidy stops and tells you. So does a file with lines a rewrite would drop (no tab in the line, an item this KoLmafia does not know, the same item twice): tidy names the first such line and changes nothing.
+- `tidy revert` refuses to restore a copy that holds no readable rules.
 - A setting that is not a whole number (`set tidy_protectAbove = off`) stops the run instead of silently becoming 0.
 - Before lowering any price it confirms with a fresh mall search, and never cuts more than `tidy_maxCutPct` in a day.
 - A listing already at or under market is never cut, whatever the price factor.
