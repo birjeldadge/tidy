@@ -51,12 +51,17 @@ each new item rather than a blanket answer.
    first, so Philter finds nothing to move for those items.
 11. Philter, in simulation for a preview or live for `tidy go`.
 
-Every run keeps the version it started from as `.prev`, taken only after the
-file has been parsed and checked, and the file is always rewritten in canonical
-five-column form because Philter's loader throws on a rule line that lost its
-trailing columns. Because that rewrite comes from the parsed map, any line the
-parser skipped would vanish, so a run stops if a non-comment line has no tab,
-names an item this KoLmafia does not know, or repeats an item.
+Every run that changes the rule file keeps the version it started from as
+`.prev`, taken on the first write, after the file has been parsed and checked;
+a run that changes nothing leaves the previous undo point alone. The file is
+always rewritten in canonical five-column form because Philter's loader throws
+on a rule line that lost its trailing columns. Because that rewrite comes from
+the parsed map, any line the parser skipped would vanish and any column mafia
+coerces would be rewritten, so a run stops if a non-comment line has no tab,
+names an item this KoLmafia does not know, repeats an item, has an empty
+action, or carries a keep-count or MALL minimum price that is not a plain
+number (mafia reads `x` as 0 and `5k` as 5; Philter's own loader would have
+refused the file).
 
 ## The safety model
 
@@ -164,7 +169,8 @@ Old Philter or OCD rule files carry decisions their owners no longer remember.
 `tidy reset` backs the file up with a date and time and runs the first-run
 preview; `tidy go` is then refused until the owner has run a plain preview and
 looked. `tidy revert` restores that backup, or otherwise swaps in the `.prev`
-copy, which every run takes once at its start so a revert undoes the whole run.
+copy, which a run takes once, on its first write, so a revert undoes the whole
+run and a run that wrote nothing does not move the undo point.
 Neither sells anything. A rule file that exists but does not parse is never
 overwritten, and the `.prev` copy is taken after that check, not before: the
 second review found the old order let the very file the check catches destroy
@@ -238,6 +244,15 @@ into a live run.
   record, released the two that were due (one of them familiar equipment,
   released at keep 1 rather than the old decision of 0) and kept the third; a
   revert cleared the preview record again.
+- The third review's rule-file and backup items, probed under the test suffix:
+  a preview with nothing to write left `.prev` absent; a preview that raised a
+  held keep-count created `.prev` equal to the file before that run; the next
+  preview that changed nothing left it byte-identical; a keep-count of `x`, a
+  keep-count of `5k`, a MALL minimum price of `abc` and an empty action each
+  stopped the run naming the line, with both files unchanged; `tidy go` under
+  the test suffix was refused; a run that stopped early left Philter's data-file
+  setting on the real name and a completed suffixed preview put it back; `tidy
+  help` ran with a broken setting and said so.
 
 ## Known limits
 
