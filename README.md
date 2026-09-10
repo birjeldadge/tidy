@@ -201,6 +201,15 @@ seller. Your call.
 
 ## Guards
 
+**If you installed before 2026-09-10 evening, `git update`.** Earlier versions
+set Philter's simulation switch through a zlib command that silently does
+nothing on a mafia where Philter has never been run, so on a brand-new install
+the first preview could have run Philter live. tidy now writes Philter's
+settings through zlib's own store and reads them back, and refuses to start
+Philter if the simulation switch does not read back as on. Found by an
+adversarial code review; nobody was hit, because both testers had run Philter
+before.
+
 - Aftercore only (refuses in Ronin or Hardcore).
 - Refuses until Hagnk's has been emptied this ascension (`pull all`).
 - Forces Philter's `BaleOCD_EmptyCloset` to -1 so Philter never dumps your closet on its own.
