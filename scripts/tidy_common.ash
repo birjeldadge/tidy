@@ -551,10 +551,15 @@ void tidy_revert() {
 // Entry point for the argument-taking scripts. Bare = preview. "go" = live. "reset" = clean sweep. Anything else = help.
 void tidy_dispatch(string which, string [int] args) {
 	string a = (count(args) > 0) ? to_lower_case(args[0]) : "";
-	if (count(args) > 1) { tidy_help(); return; }
+	if (count(args) > 1) { print("tidy: one word at a time, please. Commands:", "red"); tidy_help(); return; }
 	if (a == "reset" && which == "tidy") { tidy_reset(); return; }
 	if (a == "revert" && which == "tidy") { tidy_revert(); return; }
-	if (a != "" && a != "go") { tidy_help(); return; }
+	if (a == "sim" || a == "preview") a = "";
+	if (a != "" && a != "go") {
+		if (a != "help") print("tidy: I do not know the word '" + args[0] + "'. Nothing was done. Commands:", "red");
+		tidy_help();
+		return;
+	}
 	boolean sim = (a != "go");
 	if (which == "closet") tidy_closet_run(sim);
 	else tidy_run(sim);
