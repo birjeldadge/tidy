@@ -1,9 +1,12 @@
 // tidy_common.ash  --  shared code for the tidy commands (KoLmafia, aftercore).
 //
-//   tidy            rules for new item kinds, store top-ups at your prices, daily reprice, then Philter (LIVE)
-//   tidysim         preview of tidy: writes rules for new item kinds (so you can review them), sells nothing
-//   tidycloset      empties the closet into inventory and runs the tidy pipeline (LIVE, one-off)
-//   tidyclosetsim   preview of tidycloset: writes rules for closet items that lack one, tallies, moves nothing
+//   tidy            PREVIEW: writes rules for new item kinds (so you can review them), prints what a
+//                   live run would do, sells nothing
+//   tidy go         LIVE: rules for new item kinds, store top-ups at your prices, daily reprice, then Philter
+//   tidy help       prints the commands and settings, does nothing else (so does any other word)
+//   tidycloset      PREVIEW: writes rules for closet items that lack one, tallies, moves nothing
+//   tidycloset go   LIVE, one-off: empties the closet into inventory and runs the tidy pipeline
+//   tidysim / tidyclosetsim   older names for the two previews, still work
 //
 // Why a wrapper around Philter:
 //   1. Philter asks a blocking question when it meets an item with no rule.
@@ -273,7 +276,7 @@ void bootstrap_rules(boolean sim, string tag) {
 	}
 	if (!buffer_to_file(add, RULES_FILE)) abort(tag + "could not write " + RULES_FILE + ".");
 	print(tag + "wrote " + (nMall + nAuto + nKeep) + " rules to data/" + RULES_FILE + " (" + nMall + " mall, " + nAuto + " autosell, " + nKeep + " keep).", "blue");
-	print(tag + "Review them in the relay browser: -run script- > Philter Manager. Change anything you disagree with, then run tidysim, then tidy.", "olive");
+	print(tag + "Review them in the relay browser: -run script- > Philter Manager. Change anything you disagree with, run tidy again to preview, then tidy go.", "olive");
 }
 
 // "Market price" here is KoLmafia's mall_price(): it skips the five cheapest listings
@@ -416,8 +419,8 @@ void tidy_closet_run(boolean sim) {
 	string tag = sim ? "tidycloset (preview): " : "tidycloset: ";
 	common_guards(tag);
 	OCDinfo [item] rules;
-	if (!file_to_map(RULES_FILE, rules) || count(rules) == 0) abort(tag + "no rule file " + RULES_FILE + " yet. Run tidysim first.");
-	if (!sim && get_property("_tidyClosetPreviewed") != "true") abort(tag + "run tidyclosetsim first (once per day) and look at what it will do.");
+	if (!file_to_map(RULES_FILE, rules) || count(rules) == 0) abort(tag + "no rule file " + RULES_FILE + " yet. Run plain tidy first.");
+	if (!sim && get_property("_tidyClosetPreviewed") != "true") abort(tag + "run the preview first (plain tidycloset, no go, once per day) and look at what it will do.");
 	cli_execute("refresh closet");
 	int [item] closet = get_closet();
 	if (sim) closet_bootstrap(rules, closet, tag);
@@ -435,10 +438,10 @@ void tidy_closet_run(boolean sim) {
 	print(tag + kinds + " kinds / " + total + " items in the closet.", "blue");
 	foreach a, k in kindsBy print("  " + a + ": " + k + " kinds, " + itemsBy[a] + " items", "black");
 	print(tag + "mall listings worth about " + rnum(mallVal) + " meat; autosell about " + rnum(autoVal) + " meat (cached prices).", "blue");
-	if (missing > 0) abort(tag + missing + " closet item kinds have no rule. Run tidyclosetsim to write them, then run again.");
+	if (missing > 0) abort(tag + missing + " closet item kinds have no rule. Run plain tidycloset (the preview) to write them, then run again.");
 	if (sim) {
 		set_property("_tidyClosetPreviewed", "true");
-		print(tag + "preview only; the closet was not touched. If the tally looks right, run tidycloset today.", "olive");
+		print(tag + "preview only; the closet was not touched. If the tally looks right, run tidycloset go today.", "olive");
 		return;
 	}
 	print(tag + "emptying the closet into inventory...", "red");
@@ -446,6 +449,34 @@ void tidy_closet_run(boolean sim) {
 	tidy_run(false);
 	cli_execute("refresh closet");
 	print(tag + "done. Closet now holds " + count(get_closet()) + " kinds.", "blue");
+}
+
+void tidy_help() {
+	print("tidy: inventory cleanup on top of Philter. Nothing runs live without the word go.", "blue");
+	print("  tidy             preview: writes rules for new item kinds, shows what a live run would do, sells nothing", "black");
+	print("  tidy go          live: new rules, store top-ups at your prices, daily reprice, then Philter", "black");
+	print("  tidycloset       preview: rules for closet items that lack one, then a tally; moves nothing", "black");
+	print("  tidycloset go    live, one-off: empties the closet into inventory and runs the tidy pipeline", "black");
+	print("  tidy help        this text (any other word does the same and nothing else)", "black");
+	print("Settings (set name = value):", "blue");
+	print("  tidy_protectAbove  " + rnum(protect_above()) + "   listings priced above this are never repriced", "black");
+	print("  tidy_priceFactor   " + price_factor() + "   multiply the market price when repricing (1.0 = match, 0.99 = 1% under)", "black");
+	print("  tidy_priceJitter   " + price_jitter() + "   random spread around the factor, per item per day (0 = off)", "black");
+	print("Files in data/ (all optional):", "blue");
+	print("  " + RULES_FILE + "   your rules (edit in Philter Manager)", "black");
+	print("  " + KEEP_FILE + "   item<TAB>count: always keep that many on hand   (" + count(KEEP_LIST) + " loaded)", "black");
+	print("  " + PIN_FILE + "   item per line: never reprice these listings   (" + count(PIN_LIST) + " loaded)", "black");
+	print("  " + DRIP_FILE + "   item<TAB>count<TAB>days: small lots that run dry before relisting   (" + count(DRIP_LIST) + " loaded)", "black");
+	print("Rules of the road: whitelist only (no rule, no action); aftercore only; Hagnk's must be emptied; the 100-meat floor always holds.", "olive");
+}
+
+// Entry point for the argument-taking scripts. Bare = preview. "go" = live. Anything else = help.
+void tidy_dispatch(string which, string [int] args) {
+	string a = (count(args) > 0) ? to_lower_case(args[0]) : "";
+	if (count(args) > 1 || (a != "" && a != "go")) { tidy_help(); return; }
+	boolean sim = (a != "go");
+	if (which == "closet") tidy_closet_run(sim);
+	else tidy_run(sim);
 }
 
 void tidy_run(boolean sim) {
@@ -461,7 +492,7 @@ void tidy_run(boolean sim) {
 		file_to_map(RULES_FILE, rules);
 	}
 	if (!sim && get_property("tidy_previewed") != "true")
-		abort(tag + "run tidysim once before the first live run, and look at what it will do.");
+		abort(tag + "run a preview first (plain tidy, no go) and look at what it will do.");
 
 	// ---- load rules + defaults
 	OCDinfo [item] bale = load_defaults();

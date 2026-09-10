@@ -1,4 +1,3 @@
-// tidycloset.ash  --  empty the closet into inventory and run the tidy pipeline (LIVE).
-// Preview first with: tidyclosetsim (required, same KoL day)
+// tidycloset.ash  --  bare = preview (moves nothing), "tidycloset go" = live (empties the closet and runs tidy).
 import "tidy_common.ash";
-void main() { tidy_closet_run(false); }
+void main(string... args) { tidy_dispatch("closet", args); }

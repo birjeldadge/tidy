@@ -20,14 +20,19 @@ live command has a preview twin that sells nothing.
 
 ## Commands
 
+Nothing runs live without the word `go`.
+
 | Command | What it does |
 |---|---|
-| `tidysim` | Preview. Writes rules for any item kinds that have none (so you can review them), then prints exactly what `tidy` would do. Sells nothing. |
-| `tidy` | Live. New rules for new item kinds, store top-ups at your prices, daily reprice, then Philter. |
-| `tidyclosetsim` | Preview of `tidycloset`. Writes rules for closet items that have none, then tallies. Moves nothing. |
-| `tidycloset` | Live, one-off. Empties the closet into inventory and runs the tidy pipeline. Refuses unless `tidyclosetsim` ran the same day. |
+| `tidy` | Preview. Writes rules for any item kinds that have none (so you can review them), then prints exactly what a live run would do. Sells nothing. |
+| `tidy go` | Live. New rules for new item kinds, store top-ups at your prices, daily reprice, then Philter. |
+| `tidy help` | Prints the commands, your current settings, and which optional files are loaded. Does nothing else. Any other word does the same. |
+| `tidycloset` | Preview. Writes rules for closet items that have none, then tallies. Moves nothing. |
+| `tidycloset go` | Live, one-off. Empties the closet into inventory and runs the tidy pipeline. Refuses unless the preview ran the same day. |
 
-Typical day: `garbo; tidy` (or whatever your farming script is, then `tidy`).
+`tidysim` and `tidyclosetsim` are older names for the two previews and still work.
+
+Typical day: `garbo; tidy go` (or whatever your farming script is, then `tidy go`).
 
 ## Install
 
@@ -42,7 +47,7 @@ r26597 or newer.
 
 ## First run
 
-1. Run `tidysim`. It writes a starting rule for every item kind that has none
+1. Run `tidy`. It writes a starting rule for every item kind that has none
    to `data/OCDdata_<yourname>.txt` (your existing rules, if any, are kept),
    then previews what a live run would do. **Nothing is sold.**
 2. Open the relay browser, then **-run script- > Philter Manager**. Do not read
@@ -50,9 +55,9 @@ r26597 or newer.
    the MALL rules by price and look at the expensive ones. Change anything you
    disagree with. Keep-counts (the number next to MALL or AUTO) are how many
    copies stay in your inventory.
-3. Run `tidysim` again if you changed things, then `tidy`.
+3. Run `tidy` again if you changed things, then `tidy go`.
 
-`tidy` refuses to go live until `tidysim` has been run at least once.
+`tidy go` refuses to run until a preview has been run at least once.
 
 ## How rules get decided
 

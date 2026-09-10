@@ -1,4 +1,3 @@
-// tidy.ash  --  one-command inventory cleanup for after farming (LIVE).
-// Preview first with: tidysim
+// tidy.ash  --  bare = preview (sells nothing), "tidy go" = live, "tidy help" = readout.
 import "tidy_common.ash";
-void main() { tidy_run(false); }
+void main(string... args) { tidy_dispatch("tidy", args); }
