@@ -34,19 +34,22 @@ each new item rather than a blanket answer.
 2. First run only: a rule for every inventory item kind, nothing sold.
 3. If the rule file predates tidy: a one-time notice with counts, including any
    CLAN, GIFT, PULV, DISP, MAKE, USE, UNTN or BREAK rules it inherited.
-4. CLAN and GIFT rules become KEEP (unless `tidy_allowGiving`), each one printed.
+4. CLAN, GIFT and DISC rules become KEEP (unless `tidy_allowGiving`), each one
+   printed.
 5. Keep-count check: outfit pieces, familiar equipment and keep-list items get a
    keep-count on their MALL/AUTO rules, and copies come back from the store if
    fewer than that are on hand.
-6. Rules for new item kinds, using the generator below.
-7. Daily reprice of the store (see pricing).
-8. Drip listings (see below).
-9. Top-ups: for MALL rules on items already in the store, everything above the
+6. Held rules from earlier live runs: released if the wait is over and a
+   preview has run since; otherwise listed, with what would sell.
+7. Rules for new item kinds, using the generator below.
+8. Daily reprice of the store (see pricing).
+9. Drip listings (see below).
+10. Top-ups: for MALL rules on items already in the store, everything above the
    keep-count, counted the way Philter counts (bag + closet + worn, terrarium
    included), goes in at your existing price; copies Philter would have fetched
    off familiars (or out of the closet, when mafia may use it) are fetched
    first, so Philter finds nothing to move for those items.
-10. Philter, in simulation for a preview or live for `tidy go`.
+11. Philter, in simulation for a preview or live for `tidy go`.
 
 Every run keeps the version it started from as `.prev`, taken only after the
 file has been parsed and checked, and the file is always rewritten in canonical
@@ -65,9 +68,12 @@ prompts for, and a dispatcher that treats any unknown word as `help`.
 
 **Nothing sells on a rule the same run that wrote it.** A live run that meets a
 new item kind writes the generator's rule but holds everything on hand for
-`tidy_holdNewDays` (default 1). The next run releases it. So a spoofed or
-transient market price can never turn a new item into a sale before a human had
-a day to see the rule. Added after the adversarial review. The hold counts what
+`tidy_holdNewDays` (default 1). A later run releases it, but only after a
+preview has run to the end on a later day than the write: the preview prints
+every held rule with what would sell, and that is the look. A chained
+`garbo; tidy go` with nobody previewing keeps the hold. So a spoofed or
+transient market price can never turn a new item into a sale before a human
+saw the rule. Added after the adversarial review. The hold counts what
 Philter counts, bag + closet + worn (on you or on any familiar in the
 terrarium), and grows to cover copies picked up while
 it lasts; the second review found the first version counted only the bag, so
@@ -225,6 +231,13 @@ into a live run.
   16; a keep-1 top-up planned 15 copies with 3 fetched off familiars first; the
   fetch helper, run live, took the copies off and returned the active familiar
   with its own gear untouched.
+- Third review, second finding: the hold released on the calendar alone.
+  Probed with three held rules under the test suffix: two past the wait and one
+  inside it. With no preview recorded, a preview listed all three with what
+  would sell and released none; the next preview, one day-number later in the
+  record, released the two that were due (one of them familiar equipment,
+  released at keep 1 rather than the old decision of 0) and kept the third; a
+  revert cleared the preview record again.
 
 ## Known limits
 
