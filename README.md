@@ -34,10 +34,10 @@ Nothing runs live without the word `go`.
 | `tidy` (or `tidy sim`) | Preview. Writes rules for any inventory item kinds that have none (so you can review them), then prints exactly what a live run would do. Sells nothing. |
 | `tidy go` | Live. Rules for new item kinds, keep-count check, daily reprice, drip listings, store top-ups at your prices, then Philter. Refuses until a preview has been run at least once. |
 | `tidy help` | Prints the commands, your current settings, and which optional files are loaded. Does nothing else. Any other word does the same, after naming the word it did not understand. |
-| `tidy reset` | Clean sweep. Backs up your rule file as `OCDdata_<name>.before-reset-<date>-<time>.txt`, then runs the first-run preview: a fresh rule for every item kind in your inventory, nothing sold. `tidy go` is refused until you have run a plain `tidy` and looked. For people who picked up Philter years ago and cannot remember what they decided. |
-| `tidy revert` | Undo. Right after a reset it restores the dated backup. Otherwise it swaps in the `.prev` copy that every rule-file write leaves behind; run it again to swap back. Refuses a copy that holds no readable rules. Never sells anything. |
+| `tidy reset` | Clean sweep. Backs up your rule file as `OCDdata_<name>.before-reset-<date>-<time>.txt`, then runs the first-run preview: a fresh rule for every item kind in your inventory, nothing sold. `tidy go` is refused until you have run a plain `tidy` and looked. The dated backup stays the target of `tidy revert` until your first live run on the new rules; after that, revert goes back to undoing the last run. For people who picked up Philter years ago and cannot remember what they decided. |
+| `tidy revert` | Undo. Right after a reset it restores the dated backup. Otherwise it swaps in the `.prev` copy that every rule-file write leaves behind; run it again to swap back. Refuses a copy that holds no readable rules. After any revert, `tidy go` waits for a fresh preview. Never sells anything. |
 | `tidycloset` | Preview. Writes rules for closet items that have none, then tallies. Moves nothing. |
-| `tidycloset go` | Live, one-off. Empties the closet into inventory and runs the tidy pipeline. Refuses unless the preview ran the same day. |
+| `tidycloset go` | Live, one-off. Empties the closet into inventory and runs the tidy pipeline. Refuses unless the closet preview ran the same day and a plain `tidy` preview has been run; both checks come before the closet is emptied. |
 
 `tidysim` and `tidyclosetsim` are older names for the two previews and still work.
 
@@ -236,7 +236,11 @@ never cut. And it found that the `.prev` copy was taken before the file was
 checked, so the one file the check exists to catch (a rule file saved by an
 editor that turned tabs into spaces) overwrote the good backup, and `tidy
 revert` then swapped broken for broken. The copy is now taken after the check,
-and revert refuses an unreadable copy.
+and revert refuses an unreadable copy. Smaller fixes from the same review:
+negative or comma-formatted settings no longer switch guards off, the reset
+backup expires after your first live run on the new rules, `tidycloset go`
+checks for a preview before it empties the closet, and the store-price sanity
+check no longer trips on a listing parked at 999,999,999 meat.
 
 - Aftercore only (refuses in Ronin or Hardcore).
 - Refuses until Hagnk's has been emptied this ascension (`pull all`).
@@ -244,7 +248,8 @@ and revert refuses an unreadable copy.
 - Every run copies your rule file to `OCDdata_<name>.prev.txt`, but only after it has been read and checked, so a broken file never overwrites the last good copy.
 - A rule file that exists but does not parse is never overwritten; tidy stops and tells you. So does a file with lines a rewrite would drop (no tab in the line, an item this KoLmafia does not know, the same item twice): tidy names the first such line and changes nothing.
 - `tidy revert` refuses to restore a copy that holds no readable rules.
-- A setting that is not a whole number (`set tidy_protectAbove = off`) stops the run instead of silently becoming 0.
+- A setting that is not a plain whole number (`off`, `-1`, `1,000`, more than 15 digits) stops the run instead of silently becoming 0 and switching a guard off.
+- A preview only counts as a preview if Philter's simulation ran to the end.
 - Before lowering any price it confirms with a fresh mall search, and never cuts more than `tidy_maxCutPct` in a day.
 - A listing already at or under market is never cut, whatever the price factor.
 - A rule written by a live run cannot sell in that run (`tidy_holdNewDays`). The hold, the store top-ups and the drip keep-counts all count bag + closet + worn copies, the way Philter does.

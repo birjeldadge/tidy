@@ -85,7 +85,11 @@ string PIN_FILE = "tidy_pin_" + DATA_NAME + ".txt";
 int pref_int(string name, int dflt) {
 	string s = get_property(name);
 	if (s == "") return dflt;
-	if (!is_integer(s)) abort("tidy: " + name + " is set to '" + s + "', which is not a whole number. Fix it with: set " + name + " = " + dflt + " (or a number). Nothing done.");
+	// plain digits only: is_integer() also accepts a leading sign and commas ("-1", "1,000"), and to_int() turns a number
+	// too big for a long into 0 with nothing but a log line; either would switch a guard off silently
+	boolean digits = s.length() <= 15;
+	for i from 0 to s.length() - 1 { string c = s.char_at(i); if (c < "0" || c > "9") digits = false; }
+	if (!digits) abort("tidy: " + name + " is set to '" + s + "', which is not a plain whole number (digits only: no sign, no commas, at most 15 digits). Fix it with: set " + name + " = " + dflt + " (or a number). Nothing done.");
 	return s.to_int();
 }
 // Listings priced above this are never repriced. Unset = 1,000,000. 0 = off (everything gets repriced).
@@ -526,6 +530,7 @@ void common_guards(string tag) {
 
 void tidy_run(boolean sim);   // defined below; ASH needs to see it before tidy_closet_run uses it
 boolean IN_RESET = false;      // a reset's own preview must not count as "the user looked"
+boolean SNAPSHOT_TAKEN = false;   // tidycloset go takes its .prev before writing closet rules; tidy_run must not replace it
 
 // Write rules for closet items that have none, and turn KEEP rules on closet items into
 // CLST rules that keep today's inventory count on hand and file the rest back into the closet.
@@ -595,8 +600,10 @@ void tidy_closet_run(boolean sim) {
 		print(tag + "preview only; the closet was not touched. If the tally looks right, run tidycloset go today.", "olive");
 		return;
 	}
+	if (get_property("tidy_previewed") != "true") abort(tag + "run a plain tidy preview first and look at what it will do. The closet was not touched.");
 	print(tag + "emptying the closet into inventory...", "red");
 	if (!empty_closet()) abort(tag + "could not empty the closet. Nothing sold.");
+	SNAPSHOT_TAKEN = true;
 	tidy_run(false);
 	cli_execute("refresh closet");
 	print(tag + "done. Closet now holds " + count(get_closet()) + " kinds.", "blue");
@@ -665,8 +672,9 @@ void tidy_revert() {
 			if (!buffer_to_file(old, RULES_FILE)) abort(tag + "could not write " + RULES_FILE + ". Nothing changed.");
 			buffer_to_file(current, BACKUP_FILE);
 			set_property("tidy_resetBackup", "");
+			set_property("tidy_previewed", "false");
 			OCDinfo [item] check; file_to_map(RULES_FILE, check);
-			print(tag + "the reset is undone: " + RULES_FILE + " is back to the " + count(check) + " rules saved in " + resetBackup + ". Nothing was sold.", "olive");
+			print(tag + "the reset is undone: " + RULES_FILE + " is back to the " + count(check) + " rules saved in " + resetBackup + ". Nothing was sold. Run a plain tidy before the next tidy go.", "olive");
 			return;
 		}
 	}
@@ -677,8 +685,9 @@ void tidy_revert() {
 	if (count(check) == 0) abort(tag + BACKUP_FILE + " holds no readable rules (tabs replaced by spaces?), so it is not a version worth going back to; not restoring it. Nothing changed.");
 	if (!buffer_to_file(prev, RULES_FILE)) abort(tag + "could not write " + RULES_FILE + ". Nothing changed.");
 	buffer_to_file(current, BACKUP_FILE);
-	print(tag + RULES_FILE + " is back to its previous version (" + count(check) + " rules). Run tidy revert again to swap back. Nothing was sold.", "olive");
+	print(tag + RULES_FILE + " is back to its previous version (" + count(check) + " rules). Run tidy revert again to swap back. Nothing was sold. Run a plain tidy before the next tidy go.", "olive");
 	set_property("tidy_inheritedNoticed", "true");
+	set_property("tidy_previewed", "false");
 }
 
 // Entry point for the argument-taking scripts. Bare = preview. "go" = live. "reset" = clean sweep. Anything else = help.
@@ -712,7 +721,7 @@ void tidy_run(boolean sim) {
 	}
 	else {
 		check_rule_file(rules, tag);   // every line must have made it into the map, or a rewrite would drop rules
-		snapshot_rules();              // only after the checks: a broken file must never overwrite the last good .prev
+		if (!SNAPSHOT_TAKEN) snapshot_rules();   // only after the checks: a broken file must never overwrite the last good .prev
 	}
 	if (!sim && get_property("tidy_previewed") != "true")
 		abort(tag + "run a preview first (plain tidy, no go) and look at what it will do.");
@@ -817,7 +826,8 @@ void tidy_run(boolean sim) {
 		int excess = min(item_amount(it), on_hand(it) - rules[it].q);
 		if (excess <= 0) continue;
 		int price = shop_price(it);
-		if (price <= 0 || price >= 999999999) abort(tag + "could not read your store price for " + it + " (mafia returned " + price + "). Stopping before Philter so the listing cannot be repriced. Run 'refresh shop' and try again.");
+		// KoLmafia's "price unknown" value is 999,999,999,999 (StoreManager); a listing parked at 999,999,999 is a real price
+		if (price <= 0 || price >= 999999999999) abort(tag + "could not read your store price for " + it + " (mafia returned " + price + "). Stopping before Philter so the listing cannot be repriced. Run 'refresh shop' and try again.");
 		topped += 1; toppedItems += excess;
 		if (sim) print("  would add " + excess + " " + it + " to your store at your price of " + rnum(price), "black");
 		else {
@@ -839,6 +849,7 @@ void tidy_run(boolean sim) {
 	int kindsAfter = count(get_inventory());
 	if (!philterOk) print(tag + "Philter stopped early (see the lines above). Some rules may not have run.", "red");
 	cli_execute("refresh shop");
-	if (sim && !IN_RESET) set_property("tidy_previewed", "true");
+	if (sim && !IN_RESET && philterOk) set_property("tidy_previewed", "true");   // a simulation that stopped early is not a preview
+	if (!sim) set_property("tidy_resetBackup", "");   // a live run on the fresh rules accepts the reset; revert now undoes the last run instead
 	print(tag + "finished. Inventory " + kindsBefore + " kinds -> " + kindsAfter + " kinds; meat " + rnum(meatBefore) + " -> " + rnum(my_meat()) + "; store now has " + count(get_shop()) + " listings.", "blue");
 }
