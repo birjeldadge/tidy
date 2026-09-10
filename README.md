@@ -166,7 +166,7 @@ Set these in the gCLI with `set name = value`.
 | `tidy_junkBelow` | off | **The lazyman rule.** Off unless you set it above 100. At `1000`, every new item kind with a mall price of 1,000 meat or less and an autosell value starts as AUTO, gear and consumables included, the way a hand pass of "autosell anything under 1k" would. Everything above it in the list ("How rules get decided") still wins: untradeables, outfit pieces and keep-list items, store and display-case items, Philter's default KEEPs, and restoratives are never touched by it. Read that list before turning this on: it is the one setting that sells gear. |
 | `tidy_sellConsumables` | false | While false, potions (anything usable that grants an effect), food, booze and spleen items with no rule start as KEEP. Set true and they follow the normal rules (floor junk autosells, the rest goes to the mall). |
 | `tidy_allowGiving` | false | While false, any CLAN, GIFT or DISC rule is turned into KEEP each run, so nothing goes to the clan stash, to another player, or into the void. |
-| `tidy_priceFactor` | 1.0 | Multiplies the market price when repricing and when pricing a fresh drip lot. `0.99` lists 1% under it (10 meat on a 1,000-meat item, 10,000 on a 1,000,000-meat item) so you get the sale first. Floor of 100 meat still applies. |
+| `tidy_priceFactor` | 1.0 | Multiplies the market price when repricing and when pricing a fresh drip lot. `0.99` lists 1% under it (10 meat on a 1,000-meat item, 10,000 on a 1,000,000-meat item) so you get the sale first. Floor of 100 meat still applies. Only a listing above market is cut; one already at or under market is left alone, because the market figure counts your own units and cutting there would chase your own price down 1% a day. |
 | `tidy_priceJitter` | 0 | Random spread around the factor, so your prices are not a fixed pattern a rival can read. `0.01` with factor `0.99` draws a factor between 0.98 and 1.00 per item per day. A listing already inside that band is left alone, so this does not churn your whole store daily. Never above 1.0. |
 | `tidy_rulesSuffix` | (empty) | Testing only. Use `OCDdata_<name><suffix>.txt` instead of your real rules. |
 
@@ -208,7 +208,9 @@ from scripts (it is anti-mallbot policy in mafia itself): the price a script can
 see is the 5th cheapest. That is what tidy uses. At factor 1.0 you sit at or
 above the cheapest sellers and never start a price war. With a factor under 1.0
 you list below that number, which may or may not undercut the real cheapest
-seller. Your call.
+seller. Your call. It only ever applies to a listing that sits above market:
+when you are the cheapest seller, the market figure is your own price, and
+tidy leaves it alone.
 
 ## Guards
 
@@ -227,7 +229,10 @@ while Philter counts bag + closet + worn copies. So on the run that wrote a new
 rule, Philter could still sell the bag copies if more copies sat in your
 closet, and a keep-count MALL rule on an item you were wearing could have its
 listing repriced by Philter. Found by a second adversarial review of the merged
-fixes; all three counts now match Philter's.
+fixes; all three counts now match Philter's. The same review found that a
+`tidy_priceFactor` under 1.0 cut a listing that was itself the cheapest on the
+market 1% under its own price every day; a listing at or under market is now
+never cut.
 
 - Aftercore only (refuses in Ronin or Hardcore).
 - Refuses until Hagnk's has been emptied this ascension (`pull all`).
@@ -236,6 +241,7 @@ fixes; all three counts now match Philter's.
 - A rule file that exists but does not parse is never overwritten; tidy stops and tells you.
 - A setting that is not a whole number (`set tidy_protectAbove = off`) stops the run instead of silently becoming 0.
 - Before lowering any price it confirms with a fresh mall search, and never cuts more than `tidy_maxCutPct` in a day.
+- A listing already at or under market is never cut, whatever the price factor.
 - A rule written by a live run cannot sell in that run (`tidy_holdNewDays`). The hold, the store top-ups and the drip keep-counts all count bag + closet + worn copies, the way Philter does.
 - If a store price cannot be read, a top-up fails, a take-back fails, or any reprice fails, tidy stops before Philter runs.
 - Drip listings only ever list items whose rule says MALL.
