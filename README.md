@@ -221,5 +221,7 @@ put the last batch back.
 
 ## Credits
 
+Design notes, including why each default is what it is: [DESIGN.md](DESIGN.md).
+
 Written by Birj. Built on Philter (LASS) and OCD Inventory Control (Bale), and
 Zarqon's zlib. MIT licensed.
