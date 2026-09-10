@@ -142,3 +142,9 @@ Neither sells anything.
 
 Built on Philter (Loathing Associates Scripting Society, MIT for post-2020 code)
 and OCD Inventory Control (Bale), with Zarqon's zlib. tidy itself is MIT.
+
+The code was written by Claude (Anthropic's AI assistant) working under Birj's
+direction, in sessions where Birj decided the rules and the pricing ethics and
+two clanmates tested each change and reported back. Every change was compiled
+and preview-run on Birj's account before it was pushed. If that matters to how
+you read the code, now you know.

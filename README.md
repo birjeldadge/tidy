@@ -223,5 +223,7 @@ put the last batch back.
 
 Design notes, including why each default is what it is: [DESIGN.md](DESIGN.md).
 
-Written by Birj. Built on Philter (LASS) and OCD Inventory Control (Bale), and
-Zarqon's zlib. MIT licensed.
+Written by Birj (birjeldadge) with Claude, Anthropic's AI assistant, doing the
+coding under his direction: Birj set the rules and the ethics, two clanmates
+tested and pushed back, Claude wrote and tested the ASH. Built on Philter (LASS)
+and OCD Inventory Control (Bale), and Zarqon's zlib. MIT licensed.
