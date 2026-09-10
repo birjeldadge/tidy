@@ -167,11 +167,13 @@ boolean is_tool_type(item it) {
 	return t.contains_text("reusable") || t.contains_text("grow") || t.contains_text("sticker")
 		|| t.contains_text("card") || t.contains_text("folder") || t.contains_text("spur")
 		|| t.contains_text("skin") || t.contains_text("avatar") || t.contains_text("message")
-		|| t.contains_text("zap");
+		|| t.contains_text("zap") || t.contains_text("restore");   // hp/mp restoratives are supplies, not junk
 }
+// How many of a piece of gear you can wear at once: three accessory slots, one of anything else.
+int gear_slots(item it) { return it.to_slot() == $slot[acc1] ? 3 : 1; }
 
-// Always keep one of every piece of a saved custom outfit and one of every familiar
-// equipment item. Extras may sell; the last copy never does.
+// Always keep one of every piece of a saved custom outfit (three for accessories) and one of
+// every familiar equipment item. Extras may sell; the last copy never does.
 boolean [item] outfit_piece_set() {
 	boolean [item] s;
 	foreach i, o in get_custom_outfits() {
@@ -190,10 +192,10 @@ int [item] load_keep_list() {
 }
 int [item] KEEP_LIST = load_keep_list();
 // Minimum copies to keep on hand: keep-list items keep their listed count,
-// outfit pieces and familiar equipment keep 1, everything else 0.
+// outfit pieces and familiar equipment keep as many as you can wear (3 for accessories, else 1), everything else 0.
 int protect_min(item it, boolean [item] pieces) {
 	if ((KEEP_LIST contains it) && KEEP_LIST[it] > 0) return KEEP_LIST[it];
-	if (is_protected_gear(it, pieces)) return 1;
+	if (is_protected_gear(it, pieces)) return gear_slots(it);
 	return 0;
 }
 int on_hand(item it) { return item_amount(it) + closet_amount(it) + equipped_amount(it); }
@@ -255,27 +257,29 @@ Decision sell(string action, int q, string why) { Decision d; d.action = action;
 // Decide a rule for an item that has none yet. n = how many you have.
 Decision decide(item it, int n, OCDinfo [item] bale, int [item] shop, boolean [item] pieces) {
 	if (!is_tradeable(it)) return keep("untradeable");
+	int p = sale_price(it);
+	int ka = keep_above();
 	int m = protect_min(it, pieces);
 	if (m > 0) {
-		string why = (KEEP_LIST contains it) ? "on your keep list: keep " + m : "outfit piece / familiar equipment: keep 1";
+		string why = (KEEP_LIST contains it) ? "on your keep list: keep " + m : "outfit piece / familiar equipment: keep " + m;
+		if (n > m && ka > 0 && p >= ka) return keep(why + ", extras worth " + rnum(p) + " each: yours to decide");
 		if (n > m) return sell("MALL", m, why + ", sell extras");
 		return keep(why);
 	}
 	if (shop contains it) return keep("already in your store: yours to decide");
 	if (display_amount(it) > 0) return keep("also in display case");
 	if (bale contains it && bale[it].action != "MALL" && bale[it].action != "AUTO") return keep("default ruleset says " + bale[it].action);
-	int p = sale_price(it);
 	boolean gear = (it.to_slot() != $slot[none]);
 	if (gear || is_tool_type(it)) {
-		if (n >= 2 && p > 0 && p < 10000) {
-			if (p <= 100 && autosell_price(it) >= 1) return sell("AUTO", 1, "duplicate cheap gear, keep 1");
+		int slots = gear_slots(it);
+		if (n > slots && p > 0 && p < 10000) {
+			if (p <= 100 && autosell_price(it) >= 1) return sell("AUTO", slots, "duplicate cheap gear, keep " + slots);
 			if (p <= 100) return keep("duplicate gear at floor, no autosell value");
-			return sell("MALL", 1, "duplicate cheap gear, keep 1");
+			return sell("MALL", slots, "duplicate cheap gear, keep " + slots);
 		}
 		return keep("gear/tool");
 	}
 	if (p <= 0) return keep("no mall price");
-	int ka = keep_above();
 	if (ka > 0 && p >= ka) return keep("worth " + rnum(p) + " each: yours to decide");
 	if (p <= 100) {
 		if (autosell_price(it) >= 1) return sell("AUTO", 0, "mall at floor, autosell");
