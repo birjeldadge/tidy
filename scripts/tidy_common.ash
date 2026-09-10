@@ -18,13 +18,15 @@
 //      to the whole listing. Anything already in your store is topped up here,
 //      at the price you set, before Philter runs. Philter then finds nothing
 //      left to move for those items.
-//   3. Once per KoL day, any listing priced at or under tidy_protectAbove
+//   3. Once a day, any listing priced at or under tidy_protectAbove
 //      (default 1,000,000 meat) that sits above KoLmafia's market price is
-//      lowered to it. That price skips the five cheapest listings, so it never
+//      lowered to it. That price skips the five cheapest units, so it never
 //      undercuts anyone. By default it never raises a price you set, never
-//      chases a market that collapsed to the 100-meat floor, and never goes
-//      below 100 meat. Listings above the threshold are your hand-set prices
-//      and are left alone. No price duels.
+//      chases a market that collapsed to KoL's floor (100 meat or twice the
+//      autosell value), never goes below that floor or below the rule's own
+//      minimum price, and moves a listing at most tidy_maxCutPct a day.
+//      Listings above the threshold, or parked at 999,999,999+, are your
+//      hand-set prices and are left alone. No price duels.
 //
 // Rule logic for new kinds (decide): untradeable, gear, tools, display-case items
 // and rare singles stay; floor-priced junk is autosold; everything else goes to
@@ -32,7 +34,8 @@
 //
 // Settings (KoLmafia preferences, set with: set tidy_protectAbove = 5000000):
 //   tidy_keepAbove      new item kinds priced at or above this each start as KEEP, whatever the count (unset = 10000; 0 = off)
-//   tidy_reprice        down (default: never raise a price, never chase a market that collapsed to the floor) | both | off
+//   tidy_reprice        down (default: never raise a price, never chase a market that collapsed to the floor) | both (either
+//                       direction, same daily cap, fresh search before any change) | off
 //   tidy_protectAbove   listings priced above this are never repriced (unset = 1000000; 0 = off, reprice everything)
 //   tidy_junkBelow      off (default): the lazyman rule. Set to e.g. 1000 and new item kinds with a mall price at or
 //                       below that and an autosell value start as AUTO, gear and consumables included. Protected classes still win.
@@ -176,13 +179,16 @@ float price_jitter() {
 	float j = get_property("tidy_priceJitter").to_float();
 	return (j > 0.0 && j < 1.0) ? j : 0.0;
 }
-// The band a listing may sit in: factor - jitter .. factor + jitter, never above 1.0, never below 100 meat.
-int band_low(int mkt) { float lo = price_factor() - price_jitter(); if (lo < 0.01) lo = 0.01; int p = floor(mkt * lo); return p < 100 ? 100 : p; }
-int band_high(int mkt) { float hi = price_factor() + price_jitter(); if (hi > 1.0) hi = 1.0; int p = floor(mkt * hi); return p < 100 ? 100 : p; }
+// KoL's own floor for a mall price: 100 meat, or twice the autosell value when that is higher (the store request
+// clamps to it). Pricing under it is a no-op that would repeat daily, and with a factor under 1.0 a target below it.
+int mall_floor(item it) { int a = autosell_price(it); if (a < 0) a = -a; return max(100, 2 * a); }
+// The band a listing may sit in: factor - jitter .. factor + jitter, never above 1.0, never below the floor.
+int band_low(item it, int mkt) { float lo = price_factor() - price_jitter(); if (lo < 0.01) lo = 0.01; int p = floor(mkt * lo); int fl = mall_floor(it); return p < fl ? fl : p; }
+int band_high(item it, int mkt) { float hi = price_factor() + price_jitter(); if (hi > 1.0) hi = 1.0; int p = floor(mkt * hi); int fl = mall_floor(it); return p < fl ? fl : p; }
 // A fresh price for a listing: a random point in the band (or exactly the factor when jitter is 0).
-int target_price(int mkt) {
-	if (price_jitter() == 0.0) { int p = floor(mkt * price_factor()); return p < 100 ? 100 : p; }
-	int lo = band_low(mkt); int hi = band_high(mkt);
+int target_price(item it, int mkt) {
+	if (price_jitter() == 0.0) { int p = floor(mkt * price_factor()); int fl = mall_floor(it); return p < fl ? fl : p; }
+	int lo = band_low(it, mkt); int hi = band_high(it, mkt);
 	if (hi <= lo) return lo;
 	return lo + random(hi - lo + 1);
 }
@@ -192,6 +198,9 @@ record DripSpec {
 	int n;
 	int days;
 };
+string STATE_FILE = "tidy_state_" + DATA_NAME + ".txt";   // small facts that must live next to the rule file, not in a per-install preference
+string [string] load_state() { string [string] st; file_to_map(STATE_FILE, st); return st; }
+void save_state(string [string] st, string tag) { if (!map_to_file(st, STATE_FILE)) abort(tag + "could not write " + STATE_FILE + ". Stopping before any price changes."); }
 string DRIP_FILE = "tidy_drip_" + DATA_NAME + ".txt";
 string DRIP_STATE_FILE = "tidy_drip_state_" + DATA_NAME + ".txt";   // real day number each drip listing was first seen empty
 DripSpec [item] load_drip_list() {
@@ -456,9 +465,18 @@ void bootstrap_rules(boolean sim, string tag) {
 // never undercuts anyone. Scripts cannot read the mall search page itself (mafia returns
 // it empty), so the exact lowest seller is not available; this is the honest substitute.
 
-// Reprice every store listing to the current market price, once per KoL day.
-void reprice_store(boolean sim, string tag) {
-	if (!sim && get_property("_tidyRepricedToday") == "true") {
+// Philter's own floor for a MALL rule: the rule's fourth column, when it is a number (Philter Manager writes it).
+int rule_min_price(OCDinfo [item] rules, item it) {
+	if (!(rules contains it) || rules[it].action != "MALL") return 0;
+	return plain_digits(rules[it].info) ? rules[it].info.to_int() : 0;
+}
+
+// Reprice every store listing to the current market price, once a day. The day is recorded in the state file next to
+// the rule file BEFORE the first change, so a run that stops halfway cannot cut the same listing twice, and neither can
+// two mafia installs that share one data folder (a preference would be per install).
+void reprice_store(OCDinfo [item] rules, boolean sim, string tag) {
+	string [string] st = load_state();
+	if (!sim && (st contains "repriceDay") && st["repriceDay"] == today_number().to_string()) {
 		print(tag + "store already repriced today; skipping that step.", "blue");
 		return;
 	}
@@ -467,43 +485,51 @@ void reprice_store(boolean sim, string tag) {
 	int limit = protect_above();
 	float factor = price_factor();
 	int [item] shop = get_shop();
-	int changed = 0; int same = 0; int protectedCount = 0; int noPrice = 0; int pinned = 0; int wouldRaise = 0; int atFloor = 0; int atMarket = 0; int capped = 0; int failed = 0;
+	int changed = 0; int same = 0; int protectedCount = 0; int parked = 0; int noPrice = 0; int pinned = 0; int wouldRaise = 0; int atFloor = 0; int atMarket = 0; int capped = 0; int atMin = 0; int failed = 0;
 	int cutPct = max_cut_pct();
+	if (!sim) { st["repriceDay"] = today_number(); save_state(st, tag); }
 	foreach it, n in shop {
 		if (PIN_LIST contains it) { pinned += 1; continue; }
 		int cur = shop_price(it);
+		if (cur >= 999999999) { parked += 1; continue; }   // the "not for sale" convention, whatever the protect threshold says
 		if (limit > 0 && cur > limit) { protectedCount += 1; continue; }
-		// Live search only where it matters (listings at 10,000+); cheap listings use the daily cached price,
-		// otherwise a big store means thousands of mall searches every day.
-		int mkt = (cur >= 10000 || historical_age(it) >= 1.0) ? mall_price(it, 0.0) : mall_price(it);
+		// A live run searches fresh where it matters (listings at 10,000+, or a stale cache); cheap listings use the cached
+		// price, or a big store means thousands of searches a day. A preview uses the cache throughout (one search per item
+		// per session), so repeated previews do not hammer the mall.
+		int mkt = (!sim && (cur >= 10000 || historical_age(it) >= 1.0)) ? mall_price(it, 0.0) : mall_price(it);
 		if (mkt <= 0) { noPrice += 1; continue; }
 		if (limit > 0 && mkt > limit) { protectedCount += 1; continue; }
-		// about to lower a price on a cached number? confirm with a fresh search first
-		if (mkt < cur && cur < 10000 && historical_age(it) < 1.0) { mkt = mall_price(it, 0.0); if (mkt <= 0) { noPrice += 1; continue; } }
+		// about to change a price on a cached number? confirm with a fresh search first (live runs only)
+		if (!sim && mkt != cur && cur < 10000 && historical_age(it) < 1.0) { mkt = mall_price(it, 0.0); if (mkt <= 0) { noPrice += 1; continue; } }
 		// inside the allowed band already: leave it (with jitter 0 the band is a single price)
-		if (cur >= band_low(mkt) && cur <= band_high(mkt)) { same += 1; continue; }
-		if (mode == "down" && mkt <= 100) { atFloor += 1; continue; }   // market collapsed to the floor: not worth chasing
-		int newp = target_price(mkt);
+		if (cur >= band_low(it, mkt) && cur <= band_high(it, mkt)) { same += 1; continue; }
+		if (mode == "down" && mkt <= mall_floor(it)) { atFloor += 1; continue; }   // market collapsed to the floor: not worth chasing
+		int newp = target_price(it, mkt);
 		if (newp == cur) { same += 1; continue; }
 		if (mode == "down" && newp > cur) { wouldRaise += 1; continue; }   // never raise a price you set
 		// Never cut a listing that is already at or under market. The market figure counts your own units, so when
 		// you are the cheapest seller it IS your price, and a factor under 1.0 would cut you under yourself every day.
 		if (newp < cur && cur <= mkt) { atMarket += 1; continue; }
+		int fl = mall_floor(it);
 		int floorToday = cur - (cur * cutPct / 100);   // no more than tidy_maxCutPct off in one day
-		if (newp < floorToday) { newp = floorToday < 100 ? 100 : floorToday; capped += 1; }
-		if (newp == cur) { same += 1; continue; }
+		int ceilToday = cur + (cur * cutPct / 100);    // and no more than that up in one day ("both" mode), a troll listing cannot drag you to 900k
+		if (newp < floorToday) { newp = floorToday < fl ? fl : floorToday; capped += 1; }
+		if (newp > ceilToday) { newp = ceilToday; capped += 1; }
+		int minp = rule_min_price(rules, it);   // the rule's own minimum price is never undercut
+		if (newp < minp) { newp = minp; atMin += 1; }
+		if (newp == cur || (mode == "down" && newp > cur)) { same += 1; continue; }
 		changed += 1;
 		if (sim) print("  would reprice " + n + " " + it + ": " + rnum(cur) + " -> " + rnum(newp), "black");
 		else if (reprice_shop(newp, shop_limit(it), it)) print("  repriced " + n + " " + it + ": " + rnum(cur) + " -> " + rnum(newp), "black");
 		else { failed += 1; print(tag + "could not reprice " + it + "; left at " + rnum(cur) + ".", "red"); }
 	}
 	if (failed > 0) abort(tag + failed + " reprice" + (failed == 1 ? "" : "s") + " failed; mafia may be in an error state. Stopping before Philter. Run 'refresh all' and try again.");
-	if (!sim) set_property("_tidyRepricedToday", "true");
-	if (capped > 0) print(tag + capped + " cut" + (capped == 1 ? "" : "s") + " limited to " + cutPct + "% today (tidy_maxCutPct); the rest of the way comes on later days if the market stays there.", "blue");
+	if (capped > 0) print(tag + capped + " change" + (capped == 1 ? "" : "s") + " limited to " + cutPct + "% today (tidy_maxCutPct); the rest of the way comes on later days if the market stays there.", "blue");
+	if (atMin > 0) print(tag + atMin + " listing" + (atMin == 1 ? "" : "s") + " held at the rule's own minimum price (Philter Manager's minimum column).", "blue");
 	string how = (factor < 1.0 || price_jitter() > 0.0) ? " (factor " + factor + (price_jitter() > 0.0 ? " +/- " + price_jitter() : "") + ")" : "";
-	print(tag + (sim ? "would reprice " : "repriced ") + changed + " listing" + (changed == 1 ? "" : "s") + " to market" + how + "; " + same + " already there; " + protectedCount + " left alone (" + (limit > 0 ? "over " + rnum(limit) + " meat" : "protect threshold off") + "); " + pinned + " pinned; " + noPrice + " with no market price.", "blue");
+	print(tag + (sim ? "would reprice " : "repriced ") + changed + " listing" + (changed == 1 ? "" : "s") + " to market" + how + "; " + same + " already there; " + protectedCount + " left alone (" + (limit > 0 ? "over " + rnum(limit) + " meat" : "protect threshold off") + "); " + parked + " parked at 999,999,999+; " + pinned + " pinned; " + noPrice + " with no market price.", "blue");
 	if (mode == "down" && (wouldRaise > 0 || atFloor > 0))
-		print(tag + wouldRaise + " below market and left there (tidy never raises your prices); " + atFloor + " with a market at the 100-meat floor, not chased. Set tidy_reprice = both to change that.", "blue");
+		print(tag + wouldRaise + " below market and left there (tidy never raises your prices); " + atFloor + " with a market at KoL's floor, not chased. Set tidy_reprice = both to change that.", "blue");
 	if (atMarket > 0) print(tag + atMarket + " already at or under market and left there (a price factor only applies to listings above market, so you never chase your own price down).", "blue");
 }
 
@@ -536,15 +562,15 @@ void drip_step(OCDinfo [item] rules, int [item] shop, boolean sim, string tag) {
 				print("  drip: " + it + " empty for " + emptyDays + " of " + spec.days + " days; not relisting yet", "black");
 			}
 			else {
-				int mkt = mall_price(it, 0.0);
+				int mkt = sim ? mall_price(it) : mall_price(it, 0.0);
 				if (mkt <= 0) print(tag + "drip: no market price for " + it + "; not listed.", "red");
 				else {
-					int price = target_price(mkt);
+					int price = max(target_price(it, mkt), rule_min_price(rules, it));
 					int n = min(spec.n, item_amount(it));
 					listed += 1;
 					if (sim) print("  drip: would list " + n + " " + it + " at " + rnum(price) + " (holding " + (item_amount(it) - n) + " back)", "black");
 					else if (put_shop(price, 0, n, it)) { print("  drip: listed " + n + " " + it + " at " + rnum(price) + " (holding " + item_amount(it) + " back)", "black"); remove state[it]; }
-					else print(tag + "drip: could not list " + it + ".", "red");
+					else abort(tag + "drip: could not list " + it + "; mafia may be in an error state. Stopping before Philter. Run 'refresh all' and try again.");
 				}
 			}
 		}
@@ -689,7 +715,7 @@ void tidy_help() {
 	h_cmd(KEEP_FILE, "item, tab, count: always keep that many on hand (" + count(KEEP_LIST) + " loaded)");
 	h_cmd(PIN_FILE, "one item per line: never reprice these listings (" + count(PIN_LIST) + " loaded)");
 	h_cmd(DRIP_FILE, "item, tab, count, tab, days: small lots that run dry before relisting (" + count(DRIP_LIST) + " loaded)");
-	print_html("<font color='olive'>Rules of the road: whitelist only (no rule, no action); aftercore only; Hagnk's must be emptied; the 100-meat floor always holds.</font>");
+	print_html("<font color='olive'>Rules of the road: whitelist only (no rule, no action); aftercore only; Hagnk's must be emptied; KoL's price floor (100 meat or twice the autosell value) and a rule's own minimum price always hold.</font>");
 }
 
 // Clean sweep: back the rule file up, empty it, and run the first-run preview again (nothing sold).
@@ -873,7 +899,7 @@ void tidy_run(boolean sim) {
 	}
 
 	// ---- reprice the store to market (once a day), then top up at the resulting prices
-	reprice_store(sim, tag);
+	reprice_store(rules, sim, tag);
 
 	// ---- drip listings: small fixed lots that are allowed to run dry
 	drip_step(rules, shop, sim, tag);
