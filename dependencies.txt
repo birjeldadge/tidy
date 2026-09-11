@@ -1,2 +1,2 @@
-github Loathing-Associates-Scripting-Society/philter main
+github Loathing-Associates-Scripting-Society/philter
 https://svn.code.sf.net/p/zlib/code
