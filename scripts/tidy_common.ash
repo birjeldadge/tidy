@@ -42,7 +42,7 @@
 //   tidy_sellConsumables false (default): potions (usable, grants an effect), food, booze, spleen items with no rule start as KEEP
 //   tidy_allowGiving    false (default): rules that say CLAN (clan stash), GIFT (kmail) or DISC (discard) are turned into KEEP every run
 //   tidy_maxCutPct      30: the most the daily reprice may cut one listing in one day, as a percent of its current price
-//   tidy_holdNewDays    1: a live run writes rules for new item kinds but holds them this many days before they can sell (0 = off).
+//   tidy_holdNewDays    1: any run that writes a new MALL/AUTO rule (preview, first run, closet preview, live) holds it this many days before it can sell (0 = off).
 //                       A held rule is released only after the wait AND after a preview has run to the end on a later day than
 //                       the rule was written (the preview lists every held rule and what would sell), so nothing sells on a
 //                       rule nobody looked at. Holds, top-ups and drip keep-counts count bag + closet + worn copies, as Philter does.
@@ -149,13 +149,17 @@ int max_cut_pct() {
 	if (c > 100) c = 100;
 	return c;
 }
-// New item kinds found during a LIVE run are written with their rule but held for this many days
-// before they can sell, so a rule nobody has looked at never sells in the run that created it.
+// New MALL/AUTO rules, whichever run writes them, are held for this many days (and until a later-day preview has
+// listed them) before they can sell, so a rule nobody has looked at never sells.
 int hold_new_days() {
 	int d = pref_int("tidy_holdNewDays", 1);
 	return d < 0 ? 0 : d;
 }
+// The day number (UTC calendar day), read ONCE per run. The hold write day, the due test, the drip counters, the
+// reprice record and the preview record must all use the same value: with separate clock reads, a preview that
+// started before and ended after 00:00 UTC recorded itself as a later-day look at the rules it had just written.
 int today_number() { return now_to_int() / 86400000; }
+int RUN_DAY = today_number();
 // While false (default), potions, food, booze and spleen items with no rule start as KEEP.
 boolean sell_consumables() { return get_property("tidy_sellConsumables") == "true"; }
 boolean is_consumable(item it) {
@@ -221,10 +225,11 @@ record DripSpec {
 	int n;
 	int days;
 };
-// Rules a live run wrote that are still on hold: item -> "<write day> <decided keep-count> <held keep-count>". Kept
+// Rules tidy wrote that are still on hold: item -> "<write day> <decided keep-count> <held keep-count>". Kept
 // here, not in the rule's message column: Philter Manager writes an empty message for MALL/AUTO rules on every save,
 // which used to erase the hold and leave a permanent "keep everything" rule behind.
 string HOLD_FILE = "tidy_hold_" + DATA_NAME + ".txt";
+string HOLD_BACKUP_FILE = "tidy_hold_" + DATA_NAME + ".prev.txt";   // kept alongside the rule file's .prev, so revert restores both
 string [item] HOLDS;
 boolean HOLDS_CHANGED = false;
 // Load the records; move any hold an older version left in a rule's message column ("tidy new <day> q<n>") over.
@@ -237,13 +242,15 @@ int load_holds(OCDinfo [item] rules, string tag) {
 	int lines = 0;
 	foreach i, raw in file_to_buffer(HOLD_FILE).to_string().split_string("\n") {
 		string line = raw; if (line.ends_with("\r")) line = line.substring(0, line.length() - 1);
-		if (line.length() > 0 && !line.starts_with("#")) lines += 1;
+		boolean blank = true;
+		for c from 0 to line.length() - 1 { if (blank && line.char_at(c) != " " && line.char_at(c) != "\t") blank = false; }
+		if (line.length() > 0 && !blank && !line.starts_with("#")) lines += 1;
 	}
 	if (lines != count(HOLDS) || (HOLDS contains $item[none])) abort(tag + "data/" + HOLD_FILE + " has " + lines + " lines but " + count(HOLDS) + " readable hold records" + ((HOLDS contains $item[none]) ? " (one names an item this KoLmafia does not know, or starts with a hidden byte-order mark)" : "") + ". Every hold is kept and nothing is sold until the file is fixed (tab-separated, plain UTF-8) or restored.");
 	foreach it, r in rules {
 		if (!r.message.starts_with("tidy new ")) continue;
 		string [int] f = r.message.split_string(" ");
-		int since = (count(f) > 2 && plain_digits(f[2])) ? f[2].to_int() : today_number();
+		int since = (count(f) > 2 && plain_digits(f[2])) ? f[2].to_int() : RUN_DAY;
 		int decidedQ = (count(f) > 3 && f[3].length() > 1 && plain_digits(f[3].substring(1))) ? f[3].substring(1).to_int() : r.q;   // no decision recorded: hold everything
 		if (!(HOLDS contains it)) HOLDS[it] = since + " " + decidedQ + " " + r.q;
 		rules[it].message = ""; HOLDS_CHANGED = true; migrated += 1;
@@ -255,10 +262,12 @@ int on_hand(item it);   // defined below (after the keep-list helpers); ASH need
 // on hand, remember the decided keep-count, release only after the wait and a preview on a later day (see tidy_run).
 void hold_new_rule(item it, OCDinfo r, int decidedQ) {
 	r.q = on_hand(it);
-	HOLDS[it] = today_number() + " " + decidedQ + " " + r.q; HOLDS_CHANGED = true;
+	HOLDS[it] = RUN_DAY + " " + decidedQ + " " + r.q; HOLDS_CHANGED = true;
 }
+void snapshot_rules();   // defined below
 void save_holds(string tag) {
 	if (!HOLDS_CHANGED) return;
+	snapshot_rules();   // the hold file is written before the rule file, so the run's undo point (both files) is taken here
 	if (!map_to_file(HOLDS, HOLD_FILE)) abort(tag + "could not write " + HOLD_FILE + ". Stopping before anything is sold.");
 	HOLDS_CHANGED = false;
 }
@@ -280,11 +289,13 @@ void state_set(string key, string value, string tag) {
 void migrate_prefs(string tag) {
 	if (get_property("tidy_rulesSuffix") != "") return;
 	string [string] st = load_state(); boolean changed = false;
+	// the old preview record is NOT carried over: an earlier version could have armed it from a test-suffix preview,
+	// so one fresh preview is required after the upgrade. The backup name and the notice flag are harmless to keep.
 	foreach k in $strings[tidy_previewed, tidy_previewDay, tidy_resetBackup, tidy_inheritedNoticed] {
 		string v = get_property(k);
 		if (v == "") continue;
 		string key = k.substring(5);
-		if (!(st contains key)) { st[key] = v; changed = true; }
+		if ((key == "resetBackup" || key == "inheritedNoticed") && !(st contains key)) { st[key] = v; changed = true; }
 		set_property(k, "");
 	}
 	if (changed) save_state(st, tag);
@@ -337,7 +348,9 @@ boolean is_tool_type(item it) {
 		|| t.contains_text("skin") || t.contains_text("avatar") || t.contains_text("message")
 		|| t.contains_text("zap");
 }
-// How many of a piece of gear you can wear at once: three accessory slots, one of anything else.
+// How many of a piece of gear you can wear at once: three accessory slots, one of anything else. Keep-counts built
+// on this add the closet copies: Philter satisfies a keep-count with closet copies first and sells from the bag, then
+// off your body, so a "keep 1" with one copy in the closet would sell the one you are wearing.
 int gear_slots(item it) { return it.to_slot() == $slot[acc1] ? 3 : 1; }
 
 // Always keep one of every piece of a saved custom outfit (three for accessories) and one of
@@ -374,7 +387,7 @@ int [item] KEEP_LIST = load_keep_list();
 // outfit pieces and familiar equipment keep as many as you can wear (3 for accessories, else 1), everything else 0.
 int protect_min(item it, boolean [item] pieces) {
 	if ((KEEP_LIST contains it) && KEEP_LIST[it] > 0) return KEEP_LIST[it];
-	if (is_protected_gear(it, pieces)) return gear_slots(it);
+	if (is_protected_gear(it, pieces)) return gear_slots(it) + closet_amount(it);
 	return 0;
 }
 // What Philter measures a keep-count against: bag + closet + worn, where "worn" includes equipment on every familiar in
@@ -382,19 +395,18 @@ int protect_min(item it, boolean [item] pieces) {
 // in the campground also count for Philter and are not counted here; nothing tidy writes rules for lives there.
 int on_hand(item it) { return item_amount(it) + closet_amount(it) + equipped_amount(it, true); }
 
-// Take copies of a familiar item off the familiars wearing it, as Philter's own fetch would, so they can be listed at
-// your price. The active familiar is switched back afterwards (its item, if taken, stays off, exactly as Philter leaves it).
+// Take copies of an item off the familiars wearing it, as Philter's own fetch would, so they can be listed at your
+// price: benched familiars through equip(familiar, none), which needs no switch, the active one through its slot.
+// Familiars that wear ordinary gear (a Mad Hatrack's hat, a Disembodied Hand's weapon) count too. Never off you.
 int unequip_from_familiars(item it, int need) {
-	if (need <= 0 || it.to_slot() != $slot[familiar]) return 0;
-	familiar orig = my_familiar(); int got = 0;
+	if (need <= 0) return 0;
+	int got = 0;
 	foreach f in $familiars[] {
 		if (got >= need) break;
 		if (f == $familiar[none] || !have_familiar(f) || familiar_equipped_equipment(f) != it) continue;
-		if (!use_familiar(f)) continue;
-		if (equip($slot[familiar], $item[none])) got += 1;
+		if (f == my_familiar()) { if (equip($slot[familiar], $item[none])) got += 1; }
+		else if (equip(f, $item[none])) got += 1;
 	}
-	if (orig == $familiar[none]) { if (my_familiar() != $familiar[none] && !use_familiar($familiar[none])) abort("tidy: could not put your familiar away after fetching " + it + ". Stopping before Philter."); }
-	else if (my_familiar() != orig && !use_familiar(orig)) abort("tidy: could not switch back to " + orig + " after fetching " + it + ". Stopping before Philter.");
 	return got;
 }
 
@@ -409,6 +421,7 @@ void snapshot_rules() {
 	if (SNAPSHOT_TAKEN) return;
 	buffer current = file_to_buffer(RULES_FILE);
 	if (current.length() > 0 && !buffer_to_file(current, BACKUP_FILE)) abort("tidy: could not write " + BACKUP_FILE + ", so the last good copy of your rules could not be kept. Nothing changed, nothing sold.");
+	if (!buffer_to_file(file_to_buffer(HOLD_FILE), HOLD_BACKUP_FILE)) abort("tidy: could not write " + HOLD_BACKUP_FILE + ", so the hold records could not be kept alongside the rules. Nothing changed, nothing sold.");
 	SNAPSHOT_TAKEN = true;
 }
 
@@ -521,7 +534,7 @@ Decision decide(item it, int n, OCDinfo [item] bale, int [item] shop, boolean [i
 	if (!sell_consumables() && is_consumable(it)) return keep("consumable: yours to decide (tidy_sellConsumables = true to sell these)");
 	boolean gear = (it.to_slot() != $slot[none]);
 	if (gear || is_tool_type(it)) {
-		int slots = gear_slots(it);
+		int slots = gear_slots(it) + closet_amount(it);   // closet copies sit inside the keep, so the copy you wear is never the extra
 		if (n > slots && p > 0 && p < 10000) {
 			if (p <= 100 && autosell_price(it) >= 1) return sell("AUTO", slots, "duplicate cheap gear, keep " + slots);
 			if (p <= 100) return keep("duplicate gear at floor, no autosell value");
@@ -583,7 +596,7 @@ int rule_min_price(OCDinfo [item] rules, item it) {
 // two mafia installs that share one data folder (a preference would be per install).
 void reprice_store(OCDinfo [item] rules, boolean sim, string tag) {
 	string [string] st = load_state();
-	if (!sim && (st contains "repriceDay") && st["repriceDay"] == today_number().to_string()) {
+	if (!sim && (st contains "repriceDay") && st["repriceDay"] == RUN_DAY.to_string()) {
 		print(tag + "store already repriced today; skipping that step.", "blue");
 		return;
 	}
@@ -594,7 +607,7 @@ void reprice_store(OCDinfo [item] rules, boolean sim, string tag) {
 	int [item] shop = get_shop();
 	int changed = 0; int same = 0; int protectedCount = 0; int parked = 0; int noPrice = 0; int pinned = 0; int wouldRaise = 0; int atFloor = 0; int atMarket = 0; int capped = 0; int atMin = 0; int failed = 0;
 	int cutPct = max_cut_pct();
-	if (!sim) { st["repriceDay"] = today_number(); save_state(st, tag); }
+	if (!sim) { st["repriceDay"] = RUN_DAY; save_state(st, tag); }
 	foreach it, n in shop {
 		if (PIN_LIST contains it) { pinned += 1; continue; }
 		int cur = shop_price(it);
@@ -647,12 +660,12 @@ void drip_step(OCDinfo [item] rules, int [item] shop, boolean sim, string tag) {
 	if (count(DRIP_LIST) == 0) return;
 	int [item] state;
 	file_to_map(DRIP_STATE_FILE, state);
-	int today = now_to_int() / 86400000;   // real days, never wraps (the in-game calendar day wraps every 96 days)
-	int listed = 0; int waiting = 0; int held = 0;
+	int today = RUN_DAY;   // real (UTC) days, never wraps (the in-game calendar day wraps every 96 days)
+	int listed = 0; int waiting = 0; int held = 0; boolean changed = false;
 	boolean [item] pieces = outfit_piece_set();
 	foreach it, spec in DRIP_LIST {
 		if (!(rules contains it) || rules[it].action != "MALL") { print("  drip: " + it + " skipped, its rule is " + ((rules contains it) ? rules[it].action : "missing") + ", not MALL", "olive"); continue; }
-		if (HOLDS contains it) { print("  drip: " + it + " skipped, its rule was written by a live run and is still on hold", "olive"); continue; }
+		if (HOLDS contains it) { print("  drip: " + it + " skipped, its rule is still on hold", "olive"); continue; }
 		int inStore = (shop contains it) ? shop[it] : 0;
 		if (inStore > 0) {
 			if (state contains it) remove state[it];
@@ -686,10 +699,10 @@ void drip_step(OCDinfo [item] rules, int [item] shop, boolean sim, string tag) {
 			}
 		}
 		// whatever is still on hand stays on hand: Philter must not list it (it counts bag + closet + worn, so keep that many)
-		if ((rules contains it) && rules[it].action != "KEEP") rules[it].q = on_hand(it);
+		if ((rules contains it) && rules[it].action != "KEEP" && rules[it].q != on_hand(it)) { rules[it].q = on_hand(it); changed = true; }
 	}
 	if (!map_to_file(state, DRIP_STATE_FILE)) print(tag + "warning: could not write " + DRIP_STATE_FILE + "; the empty-day counters may be off tomorrow.", "red");
-	save_rules(rules);
+	if (changed) save_rules(rules);   // only a real change moves the .prev undo point
 	print(tag + "drip: " + listed + " " + (sim ? "would be " : "") + "listed, " + waiting + " waiting out the empty days, " + held + " held back while listed. Rule keep-counts set to what is on hand.", "blue");
 }
 
@@ -706,21 +719,23 @@ void set_philter_var(string name, string value, string tag) {
 
 void common_guards(boolean sim, string tag) {
 	if (!sim && get_property("tidy_rulesSuffix") != "") abort(tag + "tidy_rulesSuffix is set to '" + get_property("tidy_rulesSuffix") + "', which points at a test rule file. Live runs are refused while it is set. Clear it with: set tidy_rulesSuffix =");
-	if (DATAFILE_BEFORE != "" && DATAFILE_BEFORE != BASE_NAME && DATAFILE_BEFORE != DATA_NAME && !DATAFILE_BEFORE.starts_with(BASE_NAME))
+	if (DATAFILE_BEFORE != "" && DATAFILE_BEFORE != BASE_NAME && DATAFILE_BEFORE != DATA_NAME)
 		print(tag + "Philter's BaleOCD_DataFile is '" + DATAFILE_BEFORE + "', but tidy works on OCDdata_" + BASE_NAME + ".txt and points Philter at that file only while Philter runs (then puts yours back). To make tidy use your file instead: set tidy_dataFile = " + DATAFILE_BEFORE, "olive");
 	if (!can_interact()) abort(tag + "you are in Ronin or Hardcore. This is an aftercore tool.");
 	if (get_property("lastEmptiedStorage").to_int() != my_ascensions())
 		abort(tag + "Hagnk's has not been emptied this ascension. Run 'pull all' first.");
-	if (getvar("BaleOCD_EmptyCloset") != "-1") {
-		print(tag + "BaleOCD_EmptyCloset was '" + getvar("BaleOCD_EmptyCloset") + "'; setting it to -1 so Philter never dumps the closet on its own.", "olive");
+	string ec = (vars contains "BaleOCD_EmptyCloset") ? vars["BaleOCD_EmptyCloset"] : "";   // read the map, not getvar(): a missing name prints a purple line
+	if (ec != "-1") {
+		print(tag + "BaleOCD_EmptyCloset was '" + ec + "'; setting it to -1 so Philter never dumps the closet on its own.", "olive");
 		set_philter_var("BaleOCD_EmptyCloset", "-1", tag);
 	}
 }
 // Philter is pointed at this character's rule file only for the moment it runs (see tidy_run), and back at the real file
 // afterwards, so a run under the test suffix never leaves Philter or its Manager looking at the test file.
 void restore_datafile(string tag) {
-	// back to whatever it was; a value that is tidy's own name (or a test name left by a run that stopped early) goes to the base name
-	string back = (DATAFILE_BEFORE == "" || DATAFILE_BEFORE == DATA_NAME || DATAFILE_BEFORE.starts_with(BASE_NAME)) ? BASE_NAME : DATAFILE_BEFORE;
+	// back to whatever it was, exactly; only tidy's own name for this run (or nothing) becomes the base name. A test name a
+	// stopped run left behind is put back as found and reported by the notice in common_guards, never guessed at.
+	string back = (DATAFILE_BEFORE == "" || DATAFILE_BEFORE == DATA_NAME) ? BASE_NAME : DATAFILE_BEFORE;
 	if (getvar("BaleOCD_DataFile") != back) set_philter_var("BaleOCD_DataFile", back, tag);
 }
 
@@ -739,8 +754,9 @@ int closet_bootstrap(OCDinfo [item] rules, int [item] closet, string tag, boolea
 		if (rules contains it) {
 			if (rules[it].action == "KEEP") {
 				converted += 1;
-				if (apply) { rules[it].action = "CLST"; rules[it].q = item_amount(it); }
-				print("  " + it + ": KEEP -> CLST keep " + item_amount(it) + " (closet copies go back to the closet)" + (apply ? "" : " [applied on the live run]"), "black");
+				int keepOut = item_amount(it) + equipped_amount(it, true);   // what is out of the closet now (bag, you, your familiars) stays out
+				if (apply) { rules[it].action = "CLST"; rules[it].q = keepOut; }
+				print("  " + it + ": KEEP -> CLST keep " + keepOut + " (closet copies go back to the closet)" + (apply ? "" : " [applied on the live run]"), "black");
 			}
 			continue;
 		}
@@ -748,7 +764,7 @@ int closet_bootstrap(OCDinfo [item] rules, int [item] closet, string tag, boolea
 		if (it.skill != $skill[none]) { r.action = "CLST"; r.q = 0; }
 		else {
 			Decision d = decide(it, on_hand(it), bale, shop, pieces);
-			if (d.action == "KEEP") { r.action = "CLST"; r.q = item_amount(it); }
+			if (d.action == "KEEP") { r.action = "CLST"; r.q = item_amount(it) + equipped_amount(it, true); }
 			else { r.action = d.action; r.q = d.q; if (holdDays > 0) { hold_new_rule(it, r, d.q); heldNew += 1; } }
 		}
 		rules[it] = r; added += 1;
@@ -771,10 +787,10 @@ void tidy_closet_run(boolean sim) {
 	migrate_prefs(tag);
 	OCDinfo [item] rules;
 	if (!file_to_map(RULES_FILE, rules) || count(rules) == 0) abort(tag + "no rule file " + RULES_FILE + " yet. Run plain tidy first.");
-	if (!sim && get_property("_tidyClosetPreviewed") != "true") abort(tag + "run the preview first (plain tidycloset, no go, once per day) and look at what it will do.");
+	if (!sim && state_get("closetPreviewedDay") != RUN_DAY.to_string()) abort(tag + "run the preview first (plain tidycloset, no go, on the same UTC day) and look at what it will do.");
 	if (!sim && state_get("previewed") != "true") abort(tag + "run a plain tidy preview first and look at what it will do. Nothing was changed.");
 	check_rule_file(rules, tag);
-	load_holds(rules, tag);
+	if (load_holds(rules, tag) > 0) save_rules(rules);   // legacy message-column markers moved to the hold file: save the cleared messages
 	cli_execute("refresh closet");
 	int [item] closet = get_closet();
 	closet_bootstrap(rules, closet, tag, !sim);
@@ -784,7 +800,7 @@ void tidy_closet_run(boolean sim) {
 		kinds += 1; total += n;
 		if (!(rules contains it)) { missing += 1; if (missing <= 15) print("  no rule: " + n + " " + it, "red"); continue; }
 		string a = rules[it].action;
-		int sellable = max(0, n + item_amount(it) - rules[it].q);
+		int sellable = max(0, n + item_amount(it) + equipped_amount(it, true) - rules[it].q);
 		kindsBy[a] += 1; itemsBy[a] += n;
 		if (a == "MALL") mallVal += min(sellable, n) * (historical_price(it) > 0 ? historical_price(it) : 0);
 		if (a == "AUTO") autoVal += min(sellable, n) * autosell_price(it);
@@ -794,8 +810,8 @@ void tidy_closet_run(boolean sim) {
 	print(tag + "mall listings worth about " + rnum(mallVal) + " meat; autosell about " + rnum(autoVal) + " meat (cached prices).", "blue");
 	if (missing > 0) abort(tag + missing + " closet item kinds have no rule. Run plain tidycloset (the preview) to write them, then run again.");
 	if (sim) {
-		set_property("_tidyClosetPreviewed", "true");
-		print(tag + "preview only; the closet was not touched. If the tally looks right, run tidycloset go today.", "olive");
+		state_set("closetPreviewedDay", RUN_DAY.to_string(), tag);
+		print(tag + "preview only; the closet was not touched. If the tally looks right, run tidycloset go today (same UTC day).", "olive");
 		return;
 	}
 	print(tag + "emptying the closet into inventory... (if a later step stops this run, the closet stays in your inventory; fix the cause and run tidy go)", "red");
@@ -825,7 +841,7 @@ void tidy_help() {
 	h_cmd("tidy_priceFactor", price_factor() + " - multiply the market price when repricing (1.0 = match, 0.99 = 1% under)");
 	h_cmd("tidy_priceJitter", price_jitter() + " - random spread around the factor, per item per day (0 = off)");
 	h_cmd("tidy_maxCutPct", pref_text("tidy_maxCutPct", "30") + "% - the most one listing may be cut in one day; the rest comes on later days if the market stays down");
-	h_cmd("tidy_holdNewDays", pref_text("tidy_holdNewDays", "1") + " - rules a live run writes for new item kinds are held this many days, and until a later preview has listed them (0 = off)");
+	h_cmd("tidy_holdNewDays", pref_text("tidy_holdNewDays", "1") + " - rules tidy writes for new item kinds (in any run) are held this many days, and until a later-day preview has listed them (0 = off)");
 	h_cmd("tidy_junkBelow", pref_text("tidy_junkBelow", "off") + " - the lazyman rule: new item kinds worth this much or less each, with an autosell value, start as AUTO, gear and consumables included (set above 100 to turn on)");
 	h_cmd("tidy_sellConsumables", (sell_consumables() ? "true" : "false") + " - false = potions, food, booze and spleen items with no rule start as KEEP");
 	h_cmd("tidy_allowGiving", (get_property("tidy_allowGiving") == "true" ? "true" : "false") + " - false = old CLAN/GIFT/DISC rules (clan stash, kmail, discard) are turned into KEEP");
@@ -835,24 +851,32 @@ void tidy_help() {
 	h_cmd(KEEP_FILE, "item, tab, count: always keep that many on hand (" + count(KEEP_LIST) + " loaded)");
 	h_cmd(PIN_FILE, "one item per line: never reprice these listings (" + count(PIN_LIST) + " loaded)");
 	h_cmd(DRIP_FILE, "item, tab, count, tab, days: small lots that run dry before relisting (" + count(DRIP_LIST) + " loaded)");
-	h_cmd(HOLD_FILE, "rules a live run wrote that are still on hold (tidy keeps this; leave it alone)");
+	h_cmd(HOLD_FILE, "rules tidy wrote that are still on hold (tidy keeps this; leave it alone)");
+	h_cmd(STATE_FILE, "tidy's own records: last preview, reprice day, reset backup name (tidy keeps this)");
+	h_cmd(DRIP_STATE_FILE, "the day each drip listing was first seen empty (tidy keeps this)");
 	print_html("<font color='olive'>Rules of the road: whitelist only (no rule, no action); aftercore only; Hagnk's must be emptied; KoL's price floor (100 meat or twice the autosell value) and a rule's own minimum price always hold.</font>");
 }
 
 // Clean sweep: back the rule file up, empty it, and run the first-run preview again (nothing sold).
 void tidy_reset() {
 	string tag = "tidy reset: ";
+	common_guards(true, tag);   // the same checks as a preview, before anything is touched
 	migrate_prefs(tag);
 	buffer current = file_to_buffer(RULES_FILE);
 	if (current.length() == 0) { print(tag + "no rule file " + RULES_FILE + " to reset; writing a fresh one now (a plain tidy is still needed before tidy go).", "olive"); IN_RESET = true; tidy_run(true); IN_RESET = false; return; }
-	string backupName = "OCDdata_" + DATA_NAME + ".before-reset-" + now_to_string("yyyyMMdd-HHmmss") + ".txt";
+	string stamp = now_to_string("yyyyMMdd-HHmmss");
+	string backupName = "OCDdata_" + DATA_NAME + ".before-reset-" + stamp + ".txt";
+	string holdBackup = "tidy_hold_" + DATA_NAME + ".before-reset-" + stamp + ".txt";
 	if (!buffer_to_file(current, backupName)) abort(tag + "could not write the backup " + backupName + ". Nothing changed.");
-	buffer empty;
-	if (!buffer_to_file(empty, RULES_FILE)) abort(tag + "could not clear " + RULES_FILE + ". Your old rules are still in place (backup at " + backupName + ").");
+	if (!buffer_to_file(file_to_buffer(HOLD_FILE), holdBackup)) abort(tag + "could not write the hold-record backup " + holdBackup + ". Nothing changed.");
+	// the record goes in before the destructive write, so a failed record write changes nothing
 	state_set("resetBackup", backupName, tag);   // "tidy revert" restores this first
+	state_set("resetHoldBackup", holdBackup, tag);
 	state_set("previewed", "false", tag);        // the fresh rules have not been looked at yet
 	state_set("previewDay", "", tag);
-	print(tag + "old rules saved as data/" + backupName + ". Undo with: tidy revert. Run a plain tidy and look before tidy go.", "olive");
+	buffer empty;
+	if (!buffer_to_file(empty, RULES_FILE)) abort(tag + "could not clear " + RULES_FILE + ". Your old rules are still in place (backup at " + backupName + ").");
+	print(tag + "old rules saved as data/" + backupName + " (hold records as " + holdBackup + "). Undo with: tidy revert. Run a plain tidy and look before tidy go.", "olive");
 	IN_RESET = true;
 	tidy_run(true);
 	IN_RESET = false;
@@ -869,14 +893,20 @@ void tidy_revert() {
 		OCDinfo [item] oldRules; file_to_map(resetBackup, oldRules);
 		if (old.length() > 0 && count(oldRules) == 0) abort(tag + "the reset backup " + resetBackup + " holds no readable rules; not restoring it. Nothing changed.");
 		if (old.length() > 0) {
+			state_set("previewed", "false", tag);   // the gate first: a failed write below must not leave a live run armed
+			state_set("previewDay", "", tag);
 			buffer current = file_to_buffer(RULES_FILE);
 			if (!buffer_to_file(old, RULES_FILE)) abort(tag + "could not write " + RULES_FILE + ". Nothing changed.");
 			if (!buffer_to_file(current, BACKUP_FILE)) print(tag + "warning: could not write " + BACKUP_FILE + ", so a second revert cannot swap back.", "red");
+			string holdBackup = state_get("resetHoldBackup");
+			if (holdBackup != "") {
+				if (!buffer_to_file(file_to_buffer(HOLD_FILE), HOLD_BACKUP_FILE)) print(tag + "warning: could not keep the current hold records in " + HOLD_BACKUP_FILE + ".", "red");
+				if (!buffer_to_file(file_to_buffer(holdBackup), HOLD_FILE)) print(tag + "warning: could not restore the hold records from " + holdBackup + "; they are still in that file.", "red");
+			}
 			state_set("resetBackup", "", tag);
-			state_set("previewed", "false", tag);
-			state_set("previewDay", "", tag);
+			state_set("resetHoldBackup", "", tag);
 			OCDinfo [item] check; file_to_map(RULES_FILE, check);
-			print(tag + "the reset is undone: " + RULES_FILE + " is back to the " + count(check) + " rules saved in " + resetBackup + ". Nothing was sold. Run a plain tidy before the next tidy go.", "olive");
+			print(tag + "the reset is undone: " + RULES_FILE + " is back to the " + count(check) + " rules saved in " + resetBackup + (holdBackup != "" ? ", hold records restored too" : "") + ". Nothing was sold. Run a plain tidy before the next tidy go.", "olive");
 			return;
 		}
 	}
@@ -885,11 +915,15 @@ void tidy_revert() {
 	buffer current = file_to_buffer(RULES_FILE);
 	OCDinfo [item] check; file_to_map(BACKUP_FILE, check);
 	if (count(check) == 0) abort(tag + BACKUP_FILE + " holds no readable rules (tabs replaced by spaces?), so it is not a version worth going back to; not restoring it. Nothing changed.");
+	state_set("previewed", "false", tag);   // the gate first
+	state_set("previewDay", "", tag);
 	if (!buffer_to_file(prev, RULES_FILE)) abort(tag + "could not write " + RULES_FILE + ". Nothing changed.");
 	if (!buffer_to_file(current, BACKUP_FILE)) print(tag + "warning: could not write " + BACKUP_FILE + ", so a second revert cannot swap back.", "red");
-	print(tag + RULES_FILE + " is back to its previous version (" + count(check) + " rules). Run tidy revert again to swap back (only if no run has written the file in between). Nothing was sold. Run a plain tidy before the next tidy go.", "olive");
-	state_set("previewed", "false", tag);
-	state_set("previewDay", "", tag);
+	// the hold records travel with the rules: swap their .prev the same way
+	buffer prevHolds = file_to_buffer(HOLD_BACKUP_FILE); buffer curHolds = file_to_buffer(HOLD_FILE);
+	if (!buffer_to_file(prevHolds, HOLD_FILE)) print(tag + "warning: could not restore " + HOLD_FILE + "; the hold records may not match the restored rules (a mismatched hold is dropped with a message on the next run).", "red");
+	if (!buffer_to_file(curHolds, HOLD_BACKUP_FILE)) print(tag + "warning: could not write " + HOLD_BACKUP_FILE + ".", "red");
+	print(tag + RULES_FILE + " is back to its previous version (" + count(check) + " rules), hold records with it. Run tidy revert again to swap back (only if no run has written the file in between). Nothing was sold. Run a plain tidy before the next tidy go.", "olive");
 }
 
 // Entry point for the argument-taking scripts. Bare = preview. "go" = live. "reset" = clean sweep. Anything else = help.
@@ -970,6 +1004,7 @@ void tidy_run(boolean sim) {
 	enforce_keep_one(rules, sim, tag);
 	boolean [item] pieces = outfit_piece_set();
 	int [item] inv = get_inventory();   // read after the take-back, so an item just recovered from the store gets its rule this run
+	shop = get_shop();                  // likewise the store: a listing emptied by a take-back must not be topped up
 
 	// ---- release holds: rules an earlier run wrote (any run: preview, first run, closet preview, live), once the wait is
 	// over AND a preview has run since. The wait alone is a clock (UTC midnight), not a look: a rule decided from one bad
@@ -989,9 +1024,15 @@ void tidy_run(boolean sim) {
 		if (rules[it].q != heldQ && rules[it].q != expect) { drop[it] = true; dropped += 1; print("  hold dropped: " + it + " keep-count was changed by hand (" + heldQ + " -> " + rules[it].q + "); your number stands", "olive"); continue; }
 		if (rules[it].q != heldQ) { HOLDS[it] = since + " " + decidedQ + " " + rules[it].q; HOLDS_CHANGED = true; }
 		int keepQ = max(decidedQ, protect_min(it, pieces));   // a keep-list or outfit count raised meanwhile wins over the old decision
-		boolean due = today_number() - since >= holdDays;
+		boolean due = RUN_DAY - since >= holdDays;
 		boolean seen = previewDay > since;
-		if (due && seen) { rules[it].q = keepQ; drop[it] = true; released += 1; continue; }
+		if (due && seen) {
+			// one fresh search before the sale: the decision came from a cached (possibly shared, possibly gamed) price
+			int fresh = mall_price(it, 0.0);
+			boolean stale = (rules[it].action == "AUTO" && fresh > 2 * mall_floor(it)) || (keep_above() > 0 && fresh >= keep_above());
+			if (stale) { stillHeld += 1; print("  on hold: " + it + " was decided " + rules[it].action + " on a price that no longer holds (market now " + rnum(fresh) + "); kept on hold. Set the rule you want in Philter Manager (your keep-count drops the hold).", "red"); continue; }
+			rules[it].q = keepQ; drop[it] = true; released += 1; continue;
+		}
 		stillHeld += 1;
 		if (on_hand(it) > rules[it].q) { rules[it].q = on_hand(it); HOLDS[it] = since + " " + decidedQ + " " + rules[it].q; HOLDS_CHANGED = true; raisedHold += 1; }   // copies picked up since the rule was written are held too
 		int wouldSell = on_hand(it) - keepQ; if (wouldSell < 0) wouldSell = 0;
@@ -999,7 +1040,7 @@ void tidy_run(boolean sim) {
 		print("  on hold: " + on_hand(it) + " " + it + "  ->  " + rules[it].action + (keepQ > 0 ? " keep " + keepQ : "") + ", " + wouldSell + " would sell" + (due ? (sim ? " on the next tidy go, now that you have previewed" : "; run a plain tidy and look first") : " after the " + holdDays + "-day hold and a preview"), "olive");
 	}
 	foreach it in drop { remove HOLDS[it]; HOLDS_CHANGED = true; }
-	if (released > 0) print(tag + released + " rule" + (released == 1 ? "" : "s") + " written by an earlier live run " + (released == 1 ? "is" : "are") + " past the " + holdDays + "-day hold, previewed since, and can sell now.", "blue");
+	if (released > 0) print(tag + released + " rule" + (released == 1 ? "" : "s") + " written by an earlier run " + (released == 1 ? "is" : "are") + " past the " + holdDays + "-day hold, previewed since, and can sell now.", "blue");
 	if (unseen > 0) print(tag + unseen + " held rule" + (unseen == 1 ? " is" : "s are") + " past the hold but no preview has run since " + (unseen == 1 ? "it was" : "they were") + " written. " + (sim ? "This preview counts: they sell on the next tidy go." : "Nothing sells on them until you run a plain tidy and look."), "olive");
 	if (stillHeld > unseen) print(tag + (stillHeld - unseen) + " new-kind rule" + (stillHeld - unseen == 1 ? "" : "s") + " still inside the " + holdDays + "-day hold. Review in Philter Manager or in the lines above.", "olive");
 
@@ -1057,15 +1098,26 @@ void tidy_run(boolean sim) {
 		int fetch = wanted - item_amount(it);
 		int fromFamiliars = 0;
 		if (fetch > 0) {
-			if (it.to_slot() == $slot[familiar]) fromFamiliars = min(fetch, equipped_amount(it, true));
-			else if (equipped_amount(it, true) > 0) abort(tag + "the MALL rule for " + it + " keeps fewer copies than you are wearing plus your closet copies, so Philter would take it off you and re-list the whole listing at market. Raise its keep-count in Philter Manager, or unequip it. Stopping before Philter.");
-			if (fromFamiliars > 0 && is_familiar_equipment_locked()) abort(tag + "familiar equipment is locked, so " + it + " cannot be taken off your familiars here, and Philter would re-list it at market. Run 'familiar unlock' (or raise the keep-count) and try again. Stopping before Philter.");
-			if (!sim && fromFamiliars > 0) {
-				int got = unequip_from_familiars(it, fromFamiliars);
-				if (got < fromFamiliars) abort(tag + "could only take " + got + " of " + fromFamiliars + " " + it + " off your familiars; Philter would fetch the rest and re-list the listing at market. Stopping before Philter.");
+			int onYou = (it.to_slot() == $slot[familiar]) ? 0 : equipped_amount(it);   // your own slots (the familiar slot counts as "on a familiar")
+			int onFamiliars = equipped_amount(it, true) - onYou;                          // the active familiar plus every benched one, ordinary gear included
+			if (onYou > 0) {
+				string why = tag + "the MALL rule for " + it + " keeps fewer copies than you are wearing plus your closet copies, so Philter would take it off you and re-list the whole listing at market. Raise its keep-count in Philter Manager, or unequip it.";
+				if (sim) print(why + " A live run stops here.", "red");
+				else abort(why + " Stopping before Philter.");
+			}
+			else {
+				fromFamiliars = min(fetch, onFamiliars);
+				if (fromFamiliars > 0 && is_familiar_equipment_locked() && familiar_equipped_equipment(my_familiar()) == it) {
+					string why = tag + "familiar equipment is locked and your active familiar wears " + it + ", so it cannot be taken off here, and Philter would re-list it at market. Run 'familiar unlock' (or raise the keep-count) and try again.";
+					if (sim) print(why + " A live run stops here.", "red"); else abort(why + " Stopping before Philter.");
+				}
+				if (!sim && fromFamiliars > 0) {
+					int got = unequip_from_familiars(it, fromFamiliars);
+					if (got < fromFamiliars) abort(tag + "could only take " + got + " of " + fromFamiliars + " " + it + " off your familiars; Philter would fetch the rest and re-list the listing at market. Stopping before Philter.");
+				}
 			}
 		}
-		int excess = min(wanted, item_amount(it) + (sim ? fromFamiliars : 0));
+		int excess = min(wanted, item_amount(it) + ((sim && !is_familiar_equipment_locked()) ? fromFamiliars : 0));
 		if (excess <= 0) continue;
 		string fetched = (fromFamiliars > 0) ? " (" + fromFamiliars + " off your familiars first, as Philter would have)" : "";
 		topped += 1; toppedItems += excess;
@@ -1093,7 +1145,7 @@ void tidy_run(boolean sim) {
 	if (!philterOk) print(tag + "Philter stopped early (see the lines above). Some rules may not have run.", "red");
 	if (simBefore != "" && simBefore != (sim ? "true" : "false")) set_philter_var("BaleOCD_Sim", simBefore, tag);
 	cli_execute("refresh shop");
-	if (sim && !IN_RESET && philterOk) { state_set("previewed", "true", tag); state_set("previewDay", today_number().to_string(), tag); }   // a simulation that stopped early is not a preview
+	if (sim && !IN_RESET && philterOk) { state_set("previewed", "true", tag); state_set("previewDay", RUN_DAY.to_string(), tag); }   // a simulation that stopped early is not a preview; the day is the run's start day
 	if (!sim && philterOk) state_set("resetBackup", "", tag);   // a live run that got through Philter on the fresh rules accepts the reset; revert now undoes the last run instead
 	print(tag + "finished. Inventory " + kindsBefore + " kinds -> " + kindsAfter + " kinds; meat " + rnum(meatBefore) + " -> " + rnum(my_meat()) + "; store now has " + count(get_shop()) + " listings.", "blue");
 }
