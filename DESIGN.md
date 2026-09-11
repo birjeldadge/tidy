@@ -319,6 +319,14 @@ the destructive step.
   item to CLST with a keep-count of 1 and recorded its day in the state file;
   the familiar fetch took a leash off a benched familiar without switching
   familiars. The single clock read is verified by reading.
+- Sixth review, probed under the test suffix: a preview ran to the end with an
+  empty hold file and again with no hold file (the crash it found); a revert
+  straight after a first run was refused; with the lazyman rule on, every AUTO
+  rule under 1,000 meat released on the following day instead of staying held;
+  the closet preview wrote KEEP for closet items it would keep and marked what
+  they become on the live run; a worn item given a MALL keep-0 rule by hand was
+  reported for a keep-count raise. The active-familiar gear split and the
+  benched-first fetch order are verified by reading.
 
 ## Known limits
 
@@ -326,9 +334,13 @@ the destructive step.
   equipment on every familiar; git installs with a `manifest.json` root, which
   is how Philter installs as a dependency, came earlier).
 - Philter's simulation is not free of side effects: when a rule's keep-count is
-  below the number of copies on your familiars, Philter's cleanup fetches them
-  into your bag before it checks the simulation switch, so a tidy preview can
-  move familiar equipment into your bag. Nothing is sold.
+  below the number of copies you or your familiars are wearing, Philter's cleanup
+  fetches them into your bag (off your familiars and off you) before it checks
+  the simulation switch, so a tidy preview can move worn gear into your bag.
+  Nothing is sold. tidy's keep-count raise for worn gear means its own rules
+  never trigger this; a hand-written keep-count below the worn count can.
+- A release day costs one fresh mall search per released rule, and a first run
+  up to one search per item kind; a big first-run release is a slow run.
 - Philter also counts items installed in your campground; tidy does not.
   Nothing tidy writes rules for lives there in practice.
 - Restoratives come from a snapshot of mafia's `restores.txt`; new restoratives
