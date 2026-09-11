@@ -1,7 +1,7 @@
 // tidy_common.ash  --  shared code for the tidy commands (KoLmafia, aftercore).
 //
-//   tidy            PREVIEW: writes rules for new item kinds (MALL/AUTO ones on hold), raises held and drip
-//                   keep-counts, prints what a live run would do, sells nothing
+//   tidy            PREVIEW: writes rules for new item kinds (MALL/AUTO ones on hold), raises held, drip and worn-gear
+//                   keep-counts, prints what a live run would do, sells nothing and releases no hold
 //   tidy go         LIVE: rules for new item kinds, store top-ups at your prices, daily reprice, then Philter
 //   tidy reset      clean sweep: backs up the rule file, then the first-run preview writes fresh rules (sells nothing)
 //   tidy revert     undo the last change tidy made to the rule file (swap with the .prev copy; run again to swap back;
@@ -242,6 +242,19 @@ record DripSpec {
 // which used to erase the hold and leave a permanent "keep everything" rule behind.
 string HOLD_FILE = "tidy_hold_" + DATA_NAME + ".txt";
 string HOLD_BACKUP_FILE = "tidy_hold_" + DATA_NAME + ".prev.txt";   // kept alongside the rule file's .prev, so revert restores both
+// The copy starts with this line, so revert can tell "no holds then" (a copy with only the marker) from "no copy at all" (a
+// missing or 0-byte file: an install from before the copy existed). file_to_map and load_holds skip "#" lines, so the
+// marker is harmless if it is ever read back as records.
+string HOLD_COPY_MARK = "# tidy hold copy";
+boolean hold_copy_present(buffer b) { return b.to_string().starts_with(HOLD_COPY_MARK); }
+buffer hold_copy_body(buffer b) {
+	string s = b.to_string();
+	if (!s.starts_with(HOLD_COPY_MARK)) return b;
+	int nl = s.index_of("\n"); buffer o;
+	if (nl >= 0) o.append(s.substring(nl + 1));
+	return o;
+}
+boolean write_hold_copy(buffer holds) { buffer o; o.append(HOLD_COPY_MARK + "\n"); o.append(holds.to_string()); return buffer_to_file(o, HOLD_BACKUP_FILE); }
 string [item] HOLDS;
 boolean HOLDS_CHANGED = false;
 // Load the records; move any hold an older version left in a rule's message column ("tidy new <day> q<n>") over.
@@ -413,7 +426,7 @@ int on_hand(item it) { return item_amount(it) + closet_amount(it) + equipped_amo
 // check, the release, the drip and the top-up: three separate ones once disagreed, and the release day stripped gear.
 int keep_floor(item it, boolean [item] pieces) {
 	int m = protect_min(it, pieces);
-	int worn = (it.to_slot() != $slot[none]) ? equipped_amount(it, true) : 0;
+	int worn = equipped_amount(it, true);   // everything mafia counts as equipped, on you or any familiar: cards in the sleeve, codpiece gems and holstered sixguns have no slot of their own but are counted (and Philter sees them too)
 	return max(m, (worn > 0) ? worn + closet_amount(it) : 0);
 }
 
@@ -430,7 +443,7 @@ void snapshot_rules() {
 	// an empty file (first run, or after a reset) gives an empty .prev, "no previous version": a stale copy left by an
 	// older run would otherwise come back, hold records and all, on a revert after the first run
 	if (!buffer_to_file(current, BACKUP_FILE)) abort("tidy: could not write " + BACKUP_FILE + ", so the last good copy of your rules could not be kept. Nothing changed, nothing sold.");
-	if (!buffer_to_file(file_to_buffer(HOLD_FILE), HOLD_BACKUP_FILE)) abort("tidy: could not write " + HOLD_BACKUP_FILE + ", so the hold records could not be kept alongside the rules. Nothing changed, nothing sold.");
+	if (!write_hold_copy(file_to_buffer(HOLD_FILE))) abort("tidy: could not write " + HOLD_BACKUP_FILE + ", so the hold records could not be kept alongside the rules. Nothing changed, nothing sold.");
 	SNAPSHOT_TAKEN = true;
 }
 
@@ -443,7 +456,7 @@ void save_rules(OCDinfo [item] rules) {
 	if (!buffer_to_file(out, RULES_FILE)) {
 		// the hold file is written before the rule file and may already carry this run's records: put its previous version
 		// back so the two stay a pair, or the next run reads the raised held counts as hand edits and drops the holds
-		if (!buffer_to_file(file_to_buffer(HOLD_BACKUP_FILE), HOLD_FILE)) print("tidy: could not put the hold records back either; the next run may drop holds as hand edits.", "red");
+		if (!buffer_to_file(hold_copy_body(file_to_buffer(HOLD_BACKUP_FILE)), HOLD_FILE)) print("tidy: could not put the hold records back either; the next run may drop holds as hand edits.", "red");
 		abort("tidy: failed to write " + RULES_FILE + ". Nothing sold.");
 	}
 	RULES_WRITTEN = true;
@@ -502,17 +515,17 @@ void enforce_keep_one(OCDinfo [item] rules, boolean sim, string tag) {
 		int m = protect_min(it, pieces);
 		int need = keep_floor(it, pieces);   // the minimum, or the worn plus closet copies: gear on you or a familiar is never the extra
 		if (need == 0) continue;
-		if ((r.action == "MALL" || r.action == "AUTO") && r.q < need) {
+		// CLST too: Philter's fetch runs for every action but KEEP. Written in previews as well: Philter's simulation works from
+		// the file and strips a worn copy into the bag whenever the count sits under the floor, sim switch or not; a preview
+		// that only reported the raise left the next live run selling the copy the simulation had just taken off you.
+		if ((r.action == "MALL" || r.action == "AUTO" || r.action == "CLST") && r.q < need) {
 			int was = r.q;
-			if (!sim) rules[it].q = need;   // a preview only reports; a later save in the same preview must not carry this
+			rules[it].q = need;
 			patched += 1;
 			print("  keep " + need + " (was " + was + "): " + it + " (" + r.action + (need > m ? "; worn by you or a familiar, unequip it to sell it" : "") + ")", "black");
 		}
 	}
-	if (patched > 0) {
-		if (sim) print(tag + "would set keep-N on " + patched + " protected rules (outfit pieces, familiar equipment, keep list, worn gear).", "blue");
-		else { save_rules(rules); print(tag + "set keep-N on " + patched + " protected rules (outfit pieces, familiar equipment, keep list, worn gear; previous file saved as " + BACKUP_FILE + ").", "blue"); }
-	}
+	if (patched > 0) { save_rules(rules); print(tag + "set keep-N on " + patched + " rules (outfit pieces, familiar equipment, keep list, worn gear; previous file saved as " + BACKUP_FILE + ").", "blue"); }
 	int recovered = 0;
 	foreach it, n in get_shop() {
 		int m = protect_min(it, pieces);
@@ -741,7 +754,7 @@ void set_philter_var(string name, string value, string tag) {
 void common_guards(boolean sim, string tag) {
 	if (!sim && get_property("tidy_rulesSuffix") != "") abort(tag + "tidy_rulesSuffix is set to '" + get_property("tidy_rulesSuffix") + "', which points at a test rule file. Live runs are refused while it is set. Clear it with: set tidy_rulesSuffix =");
 	if (DATAFILE_BEFORE != "" && DATAFILE_BEFORE != BASE_NAME && DATAFILE_BEFORE != DATA_NAME)
-		print(tag + "Philter's BaleOCD_DataFile is '" + DATAFILE_BEFORE + "', but tidy works on OCDdata_" + BASE_NAME + ".txt and points Philter at that file only while Philter runs (then puts yours back). To make tidy use your file instead: set tidy_dataFile = " + DATAFILE_BEFORE, "olive");
+		print(tag + "Philter's BaleOCD_DataFile is '" + DATAFILE_BEFORE + "', but tidy works on OCDdata_" + BASE_NAME + ".txt and points Philter at that file only while Philter runs (then puts yours back). If '" + DATAFILE_BEFORE + "' is a test file left behind by a run that stopped early, put Philter back with: zlib BaleOCD_DataFile = " + BASE_NAME + ". Only if it really is your own rule file: set tidy_dataFile = " + DATAFILE_BEFORE, "olive");
 	string pf = get_property("tidy_priceFactor");
 	if (pf != "" && (pf.to_float() < 0.5 || pf.to_float() > 1.0)) abort(tag + "tidy_priceFactor is set to '" + pf + "'; it must be between 0.5 and 1.0 (1.0 = match the market, 0.99 = list 1% under it). Fix it with: set tidy_priceFactor = 1.0. Nothing done.");
 	if (!can_interact()) abort(tag + "you are in Ronin or Hardcore. This is an aftercore tool.");
@@ -924,7 +937,7 @@ void tidy_revert() {
 			if (!buffer_to_file(current, BACKUP_FILE)) print(tag + "warning: could not write " + BACKUP_FILE + ", so a second revert cannot swap back.", "red");
 			string holdBackup = state_get("resetHoldBackup");
 			if (holdBackup != "") {
-				if (!buffer_to_file(file_to_buffer(HOLD_FILE), HOLD_BACKUP_FILE)) print(tag + "warning: could not keep the current hold records in " + HOLD_BACKUP_FILE + ".", "red");
+				if (!write_hold_copy(file_to_buffer(HOLD_FILE))) print(tag + "warning: could not keep the current hold records in " + HOLD_BACKUP_FILE + ".", "red");
 				if (!buffer_to_file(file_to_buffer(holdBackup), HOLD_FILE)) print(tag + "warning: could not restore the hold records from " + holdBackup + "; they are still in that file.", "red");
 			}
 			state_set("resetBackup", "", tag);
@@ -942,7 +955,9 @@ void tidy_revert() {
 	// the hold records travel with the rules: both .prev copies are taken together, on a run's first write of either file,
 	// so "nothing to go back to" means both match. A run that only dropped a hold leaves the rule file identical and
 	// the records different; revert then restores the records and leaves the rule file as it is.
-	buffer prevHolds = file_to_buffer(HOLD_BACKUP_FILE); buffer curHolds = file_to_buffer(HOLD_FILE);
+	buffer prevCopy = file_to_buffer(HOLD_BACKUP_FILE); buffer curHolds = file_to_buffer(HOLD_FILE);
+	boolean haveCopy = hold_copy_present(prevCopy) || prevCopy.length() > 0;   // a marked copy, or an unmarked non-empty one from the version before the marker
+	buffer prevHolds = hold_copy_body(prevCopy);
 	boolean sameRules = (prev.to_string() == current.to_string());
 	boolean sameHolds = (prevHolds.to_string() == curHolds.to_string());
 	if (sameRules && sameHolds) abort(tag + BACKUP_FILE + " is identical to the current rule file, and the hold records match their previous copy too, so there is no earlier version to go back to. Nothing changed.");
@@ -952,12 +967,12 @@ void tidy_revert() {
 		if (!buffer_to_file(prev, RULES_FILE)) abort(tag + "could not write " + RULES_FILE + ". Nothing changed.");
 		if (!buffer_to_file(current, BACKUP_FILE)) print(tag + "warning: could not write " + BACKUP_FILE + ", so a second revert cannot swap back.", "red");
 	}
-	// An empty previous copy with records on file is not a version to go back to: a script cannot tell a missing file from
-	// an empty one, and an install from before the hold .prev existed has none. The records are kept; any that no longer
-	// match a rule are dropped with a message on the next run. Emptying the file would leave held rules with no record.
-	if (prevHolds.length() == 0 && curHolds.length() > 0) print(tag + "no previous hold records to go back to (none were held then, or an older version kept no copy); the current records are kept, and any that no longer match a rule are dropped on the next run.", "olive");
+	// No copy at all (a missing or 0-byte file: an install from before the copy existed) is not a version to go back to: the
+	// records are kept, and any that no longer match a rule are dropped with a message on the next run. A copy that holds
+	// only the marker is a real "no holds then" and is restored as such.
+	if (!haveCopy && curHolds.length() > 0) print(tag + "no previous hold records to go back to (an older version kept no copy); the current records are kept, and any that no longer match a rule are dropped on the next run.", "olive");
 	else if (!sameHolds && !buffer_to_file(prevHolds, HOLD_FILE)) print(tag + "warning: could not restore " + HOLD_FILE + "; the hold records may not match the restored rules (a mismatched hold is dropped with a message on the next run).", "red");
-	if (!buffer_to_file(curHolds, HOLD_BACKUP_FILE)) print(tag + "warning: could not write " + HOLD_BACKUP_FILE + ".", "red");
+	if (!write_hold_copy(curHolds)) print(tag + "warning: could not write " + HOLD_BACKUP_FILE + ".", "red");
 	print(tag + (sameRules ? RULES_FILE + " was already identical to its previous version and is unchanged; the hold records are back to theirs" : RULES_FILE + " is back to its previous version (" + count(check) + " rules), hold records with it") + ". Run tidy revert again to swap back (only if no run has written the file in between). Nothing was sold. Run a plain tidy before the next tidy go.", "olive");
 }
 
@@ -1046,7 +1061,7 @@ void tidy_run(boolean sim) {
 	// price sample must not sell just because a day passed. A preview that ran to the end on a later day than the write
 	// listed the rule below, with what would sell; that is the look. A chained "garbo; tidy go", or "tidy; tidy go" on the
 	// same day, with nobody looking keeps the hold.
-	int released = 0; int stillHeld = 0; int unseen = 0; int raisedHold = 0; int dropped = 0; int holdDays = hold_new_days();
+	int released = 0; int stillHeld = 0; int unseen = 0; int ready = 0; int raisedHold = 0; int dropped = 0; int holdDays = hold_new_days();
 	int migrated = load_holds(rules, tag);   // records live in data/tidy_hold_<name>.txt; older message-column markers are moved over
 	int previewDay = state_get("previewDay").to_int();   // day number of the last preview that ran to the end
 	boolean [item] drop;
@@ -1062,13 +1077,12 @@ void tidy_run(boolean sim) {
 		int keepQ = max(decidedQ, keep_floor(it, pieces));   // a keep-list or outfit count raised meanwhile, or copies now worn or closeted, win over the old decision
 		boolean due = RUN_DAY - since >= holdDays;
 		boolean seen = previewDay > since;
-		if (due && seen) {
+		if (due && seen && !sim) {   // only a live run releases: a preview lists the rule and leaves the record, so the fresh search below always precedes the sale
 			// one fresh search before the sale: the decision came from a cached (possibly shared, possibly gamed) price.
 			// Held again only if the market has left the band the decision was made in: an AUTO decision now worth more
 			// than twice the floor and more than the lazyman number, a MALL decision whose price has at least doubled and
 			// crossed tidy_keepAbove, or nothing listed at all (a fresh check is impossible, and unlisted can mean rare).
-			// A preview reads the session cache, as it does everywhere else; the live run searches, once per run per rule.
-			int fresh = sim ? mall_price(it) : mall_price(it, 0.0);
+			int fresh = mall_price(it, 0.0);
 			string why = "";
 			if (fresh <= 0) why = "nothing is listed in the mall right now, so the price cannot be checked";
 			else if (rules[it].action == "AUTO" && fresh > max(2 * mall_floor(it), junk_below())) why = "decided AUTO, but the market is now " + rnum(fresh);
@@ -1079,11 +1093,12 @@ void tidy_run(boolean sim) {
 		stillHeld += 1;
 		if (on_hand(it) > rules[it].q) { rules[it].q = on_hand(it); HOLDS[it] = since + " " + decidedQ + " " + rules[it].q + priceTail; HOLDS_CHANGED = true; raisedHold += 1; }   // copies picked up since the rule was written are held too
 		int wouldSell = on_hand(it) - keepQ; if (wouldSell < 0) wouldSell = 0;
-		if (due) unseen += 1;
-		print("  on hold: " + on_hand(it) + " " + it + "  ->  " + rules[it].action + (keepQ > 0 ? " keep " + keepQ : "") + (decidedPrice > 0 ? " (decided at " + rnum(decidedPrice) + ")" : "") + ", " + wouldSell + " would sell" + (due ? (sim ? " on the next tidy go, now that you have previewed" : "; run a plain tidy and look first") : " after the " + holdDays + "-day hold and a preview"), "olive");
+		if (due && seen) ready += 1; else if (due) unseen += 1;
+		print("  on hold: " + on_hand(it) + " " + it + "  ->  " + rules[it].action + (keepQ > 0 ? " keep " + keepQ : "") + (decidedPrice > 0 ? " (decided at " + rnum(decidedPrice) + ")" : "") + ", " + wouldSell + " would sell" + (due ? (sim ? " on the next tidy go" + (seen ? "" : ", now that you have previewed") : "; run a plain tidy and look first") : " after the " + holdDays + "-day hold and a preview"), "olive");
 	}
 	foreach it in drop { remove HOLDS[it]; HOLDS_CHANGED = true; }
 	if (released > 0) print(tag + released + " rule" + (released == 1 ? "" : "s") + " written by an earlier run " + (released == 1 ? "is" : "are") + " past the " + holdDays + "-day hold, previewed since, and can sell now.", "blue");
+	if (ready > 0) print(tag + ready + " held rule" + (ready == 1 ? " is" : "s are") + " past the hold and previewed on a later day: the next tidy go releases " + (ready == 1 ? "it" : "them") + " after one fresh price check each (a preview never releases a hold).", "olive");
 	if (unseen > 0) print(tag + unseen + " held rule" + (unseen == 1 ? " is" : "s are") + " past the hold but no preview has run since " + (unseen == 1 ? "it was" : "they were") + " written. " + (sim ? "This preview counts: they sell on the next tidy go." : "Nothing sells on them until you run a plain tidy and look."), "olive");
 	if (stillHeld > unseen) print(tag + (stillHeld - unseen) + " new-kind rule" + (stillHeld - unseen == 1 ? "" : "s") + " still inside the " + holdDays + "-day hold. Review in Philter Manager or in the lines above.", "olive");
 
