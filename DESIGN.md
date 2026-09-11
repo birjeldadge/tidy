@@ -393,6 +393,20 @@ the destructive step.
   reach the simulation with a count under it (the eighth review found the
   preview used to report the raise without writing it, and the simulation
   then stripped the copy the next live run sold).
+- A preview that raises a keep-count to the floor writes the rule file, so it
+  moves the undo point: `tidy revert` after it undoes that preview's writes;
+  a second revert swaps back.
+- A CLST keep-count at the floor means "closet every bag copy" of gear you
+  wear: "keep N spares out of the closet" cannot be expressed while closet
+  copies count toward the keep. The closet run is the one exception, for
+  that run only.
+- "N would sell" in a preview is the count at preview time; the live release
+  sells the count at that moment, copies picked up in between included. The
+  rule is what was looked at, not the number.
+- Hold records come in two shapes (with and without the decision price);
+  both are read, and a record without a price skips the doubled-price test.
+- The "one fresh preview after upgrading" note in the README is advice, not
+  enforced: an install whose state file already says a preview ran keeps it.
 - A hold record with no decision price (nothing was listed when the rule was
   written, or the record predates the price column) skips the doubled-price
   test at release; the other checks still run.
