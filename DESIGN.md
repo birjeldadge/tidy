@@ -30,8 +30,9 @@ each new item rather than a blanket answer.
 ## What a run does, in order
 
 1. Guards: aftercore only, Hagnk's emptied, Philter's closet-dump setting forced
-   off, Philter pointed at this character's rule file.
-2. First run only: a rule for every inventory item kind, nothing sold.
+   off, live runs refused under the test suffix.
+2. First run only: a rule for every inventory item kind, the MALL and AUTO ones
+   on hold, nothing sold.
 3. If the rule file predates tidy: a one-time notice with counts, including any
    CLAN, GIFT, PULV, DISP, MAKE, USE, UNTN or BREAK rules it inherited.
 4. CLAN, GIFT and DISC rules become KEEP (unless `tidy_allowGiving`), each one
@@ -39,17 +40,20 @@ each new item rather than a blanket answer.
 5. Keep-count check: outfit pieces, familiar equipment and keep-list items get a
    keep-count on their MALL/AUTO rules, and copies come back from the store if
    fewer than that are on hand.
-6. Held rules from earlier live runs: released if the wait is over and a
-   preview has run since; otherwise listed, with what would sell.
-7. Rules for new item kinds, using the generator below.
+6. Held rules from earlier runs: released if the wait is over and a preview
+   has run on a later day; otherwise listed, with what would sell.
+7. Rules for new item kinds, using the generator below; the MALL and AUTO ones
+   go on hold, in a preview as much as in a live run.
 8. Daily reprice of the store (see pricing).
 9. Drip listings (see below).
 10. Top-ups: for MALL rules on items already in the store, everything above the
    keep-count, counted the way Philter counts (bag + closet + worn, terrarium
    included), goes in at your existing price; copies Philter would have fetched
-   off familiars (or out of the closet, when mafia may use it) are fetched
-   first, so Philter finds nothing to move for those items.
-11. Philter, in simulation for a preview or live for `tidy go`.
+   off familiars are fetched first, so Philter finds nothing to move for those
+   items. Closet copies count but stay (Philter forces its closet setting off
+   while it runs); gear you wear is never taken off you: the run stops instead.
+11. Philter, in simulation for a preview or live for `tidy go`, pointed at
+   tidy's rule file for that call only.
 
 Every run that changes the rule file keeps the version it started from as
 `.prev`, taken on the first write, after the file has been parsed and checked;
@@ -71,12 +75,15 @@ KoLmafia silently drops arguments a `void main()` does not declare, the live
 command ran. The fix is a vararg `main(string... args)`, which mafia never
 prompts for, and a dispatcher that treats any unknown word as `help`.
 
-**Nothing sells on a rule the same run that wrote it.** A live run that meets a
-new item kind writes the generator's rule but holds everything on hand for
-`tidy_holdNewDays` (default 1). A later run releases it, but only after a
+**Nothing sells on a rule the same run that wrote it, nor before a human saw
+it.** Any run that meets a new item kind (a preview, the first run, the closet
+preview, a live run) writes the generator's rule but holds everything on hand
+for `tidy_holdNewDays` (default 1). A later run releases it, but only after a
 preview has run to the end on a later day than the write: the preview prints
 every held rule with what would sell, and that is the look. A chained
-`garbo; tidy go` with nobody previewing keeps the hold. So a spoofed or
+`garbo; tidy go`, or `tidy; tidy go` on the same day, with nobody looking keeps
+the hold. The fourth review found the hold covered only live-written rules, so
+the first run and a same-day `tidy; tidy go` sold on machine decisions. So a spoofed or
 transient market price can never turn a new item into a sale before a human
 saw the rule. Added after the adversarial review. The hold counts what
 Philter counts, bag + closet + worn (on you or on any familiar in the
@@ -87,7 +94,11 @@ is recorded in `data/tidy_hold_<name>.txt` rather than in the rule's message
 column: Philter Manager writes an empty message for MALL and AUTO rules on
 every save, which erased the marker and left a permanent keep-everything rule
 behind. A keep-count changed by hand on a held rule drops the hold, and the
-hand-set number stands.
+hand-set number stands; a raise tidy itself makes for a keep-list or outfit
+count is not a hand change. The preview record lives in
+`data/tidy_state_<name>.txt` with the reprice day, for the same two reasons a
+preference would not do: the test suffix must scope it, and two installs on one
+data folder must share it.
 
 **Philter's settings are verified, not assumed.** The `zlib name = value` CLI
 command silently refuses a name it has never seen, and Philter only creates its
@@ -283,6 +294,16 @@ into a live run.
   list with "cowbell" and a pin list with "seal-clubbing" refused those lines
   and loaded the exact ones; Philter's simulation switch read `false` again
   after the previews had set it to `true`.
+- Fourth review, probed under the test suffix: a first run put every MALL and
+  AUTO rule it wrote on hold, and Philter's simulation in that same run sold
+  nothing; the preview record landed in the suffixed state file and the real
+  one was untouched; a hold whose keep-count tidy itself had raised for a
+  familiar item kept its hold with the record updated, while a hand-set count
+  dropped it; a hold file with an unreadable line stopped the run before
+  anything else; the closet preview put its new MALL/AUTO closet rules on hold;
+  a drip lot left the keep-list/outfit minimum on hand; reset and revert went
+  through the state file. The worn-gear stop and the familiar-lock stop are
+  verified by reading (no worn item sits in the author's store).
 
 ## Known limits
 
@@ -299,6 +320,8 @@ into a live run.
   need a line added.
 - The 5th-cheapest price is the only market signal a script can see.
 - Nothing here knows about seasons. Crimbo stock is a KEEP rule you write.
+- A day is a UTC calendar day, in the hold and in the reprice record; for US
+  evening players a new day starts at 7 or 8 pm.
 
 ## Credits and licence
 
