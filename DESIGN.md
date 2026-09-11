@@ -83,7 +83,11 @@ preview has run to the end on a later day than the write: the preview prints
 every held rule with what would sell, and that is the look. A chained
 `garbo; tidy go`, or `tidy; tidy go` on the same day, with nobody looking keeps
 the hold. The fourth review found the hold covered only live-written rules, so
-the first run and a same-day `tidy; tidy go` sold on machine decisions. So a spoofed or
+the first run and a same-day `tidy; tidy go` sold on machine decisions. The
+fifth found the day was read from the clock at six places, so a preview that
+straddled 00:00 UTC recorded itself as a later-day look at its own rules; the
+day is now read once per run. At release, one fresh search re-checks the price
+the decision came from, and a rule that now looks wrong stays on hold. So a spoofed or
 transient market price can never turn a new item into a sale before a human
 saw the rule. Added after the adversarial review. The hold counts what
 Philter counts, bag + closet + worn (on you or on any familiar in the
@@ -129,14 +133,14 @@ For an item with no rule, in this order:
 | Check | Rule | Why |
 |---|---|---|
 | Untradeable | KEEP | Nothing to do with it |
-| Outfit piece, familiar equipment, keep-list item | keep what you can wear (3 accessories, else 1) or the listed count; sell extras, unless extras are worth `tidy_keepAbove` | A saved outfit is a statement of intent. Accessories fill three slots. A 60k extra is a decision, not junk |
+| Outfit piece, familiar equipment, keep-list item | keep what you can wear (3 accessories, else 1) plus any closet copies, or the listed count; sell extras, unless extras are worth `tidy_keepAbove` | A saved outfit is a statement of intent. Accessories fill three slots. Closet copies satisfy Philter's keep first, so they must sit inside it or the worn copy becomes the extra (a regression the fifth review caught). A 60k extra is a decision, not junk |
 | Already in your store | KEEP | You priced it. Flip the rule to MALL and tidy tops it up at your price. The first draft said MALL here and dumped 27,697 items into a curated store |
 | In your display case | KEEP | Collections are deliberate |
 | Philter's default ruleset says keep | KEEP | Bale's judgement, still good |
 | HP/MP restorative | KEEP | Supplies, not junk. Mafia exposes no flag for these to scripts and scripts cannot read the jar's table, so tidy ships mafia's list as `data/tidy_restores.txt` |
 | Lazyman rule (`tidy_junkBelow`, off by default) | AUTO if at or under the number and it has an autosell value | The "autosell everything under 1k" hand pass, for people who want it. Off because it is the one setting that sells gear |
 | Potion, food, booze, spleen item | KEEP unless `tidy_sellConsumables` | "If you find the need for a potion, it is better to already have it." A trader's words; adopted as the default |
-| Gear or reusable tool | KEEP; cheap duplicates beyond what you can wear sell | One of anything wearable is never junk |
+| Gear or reusable tool | KEEP; cheap duplicates beyond what you can wear plus your closet copies sell | One of anything wearable is never junk, and the one on your body least of all |
 | No mall price | KEEP | Cannot value it, so do not sell it |
 | Worth `tidy_keepAbove` or more each (default 10,000) | KEEP, any count | Valuable stock is a decision. This is the rule that would have saved the Bookes |
 | Mall price at the 100 floor | AUTO if it has an autosell value, else KEEP | The market is flooded; autosell is the only meat left in it |
@@ -204,7 +208,9 @@ refuses a copy that holds no readable rules. The dated backup is the revert
 target only until the first live run on the fresh rules (after that, revert
 undoes the last run), and any revert asks for a fresh preview before the next
 `tidy go`, so a rule file resurrected weeks later can never be chained straight
-into a live run.
+into a live run. The hold records are backed up and restored with the rules in
+both paths, and both commands run the guards and write their records before
+the destructive step.
 
 ## What has been tested
 
@@ -304,6 +310,15 @@ into a live run.
   a drip lot left the keep-list/outfit minimum on hand; reset and revert went
   through the state file. The worn-gear stop and the familiar-lock stop are
   verified by reading (no worn item sits in the author's store).
+- Fifth review, probed under the test suffix: cheap gear with closet copies now
+  stays KEEP on a first run instead of "keep 1, sell extras"; with a drip list
+  loaded, two previews in a row left `.prev` and the hold records' `.prev`
+  untouched; a held MALL rule on an item now worth 280,000 meat stayed on hold
+  at release time with the reason printed; `tidy revert` swapped the hold
+  records back with the rules; the closet preview converted a worn, untradeable
+  item to CLST with a keep-count of 1 and recorded its day in the state file;
+  the familiar fetch took a leash off a benched familiar without switching
+  familiars. The single clock read is verified by reading.
 
 ## Known limits
 
@@ -321,7 +336,17 @@ into a live run.
 - The 5th-cheapest price is the only market signal a script can see.
 - Nothing here knows about seasons. Crimbo stock is a KEEP rule you write.
 - A day is a UTC calendar day, in the hold and in the reprice record; for US
-  evening players a new day starts at 7 or 8 pm.
+  evening players a new day starts at 7 or 8 pm. It is read once per run.
+- The state and hold files have no lock: two mafia installs writing the same
+  file in the same second can lose a write. A sync client that lands another
+  install's copy with an identical timestamp can also hand mafia a stale read.
+- ASH has no try/finally: a run interrupted by hand while Philter is running
+  leaves Philter's simulation switch and file pointer as tidy set them until
+  the next completed run puts them back.
+- A rule line with fewer than five columns is accepted and completed on the
+  next rewrite (a missing keep-count becomes 0). That is deliberate, because
+  editors strip trailing tabs and Philter's own loader would refuse the file;
+  it also means a line truncated mid-write loses its keep-count.
 
 ## Credits and licence
 
