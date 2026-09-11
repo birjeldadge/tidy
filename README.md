@@ -14,10 +14,12 @@ and fixes the three things that make Philter annoying to run every day:
    listing up at *your* price before Philter runs, so your prices stay yours.
    The top-up counts the way Philter counts (bag, closet, and copies worn by
    you or by any familiar in your terrarium), at your price as it stands after
-   today's reprice. If Philter would fetch copies off your familiars to sell
-   them, tidy fetches them first and lists them at your price; if it would take
-   gear off you, tidy stops and says so instead (the preview warns, the live
-   run stops). Closet copies count but stay where they are, as with Philter.
+   today's reprice, and sends bag copies only. Gear you or a familiar are
+   wearing is never the extra: every run raises the keep-count on any sell rule
+   for such gear to cover the worn plus closet copies (the preview reports the
+   raise and works from it, the live run writes it), so Philter has nothing to
+   fetch off anyone. To sell a worn copy, unequip it first. Closet copies
+   count but stay where they are, as with Philter.
 3. **Stale prices.** Once a day, tidy lowers any listing under a threshold
    (default 1,000,000 meat, adjustable or off) that sits above KoLmafia's market
    price. That price is the 5th-cheapest unit on the market (counting stores'
@@ -42,7 +44,7 @@ Nothing runs live without the word `go`.
 | `tidy go` | Live. Keep-count check, held rules, rules for new item kinds, daily reprice, drip listings, store top-ups at your prices, then Philter. Refuses until a preview has been run at least once, and never sells on a rule tidy wrote until a preview on a later day has listed it. |
 | `tidy help` | Prints the commands, your current settings, and which optional files are loaded. Does nothing else. Any other word does the same, after naming the word it did not understand. |
 | `tidy reset` | Clean sweep. Backs up your rule file as `OCDdata_<name>.before-reset-<date>-<time>.txt`, then runs the first-run preview: a fresh rule for every item kind in your inventory, nothing sold. `tidy go` is refused until you have run a plain `tidy` and looked. The dated backup stays the target of `tidy revert` until your first live run on the new rules; after that, revert goes back to undoing the last run. For people who picked up Philter years ago and cannot remember what they decided. |
-| `tidy revert` | Undo. Right after a reset it restores the dated backup. Otherwise it swaps in the `.prev` copy taken by the last run that changed the file; run it again to swap back (only if no run has written the file in between). The hold records travel with the rules in both cases. Refuses a copy that holds no readable rules, or one identical to the current file (nothing to go back to). After any revert, `tidy go` waits for a fresh preview. Never sells anything. |
+| `tidy revert` | Undo. Right after a reset it restores the dated backup. Otherwise it swaps in the `.prev` copy taken by the last run that changed the file; run it again to swap back (only if no run has written the file in between). The hold records travel with the rules in both cases. Refuses a copy that holds no readable rules, or one identical to the current file with the hold records matching too (nothing to go back to); when only the hold records differ, they are restored and the rule file is left as it is. It never replaces hold records with an empty copy. After any revert, `tidy go` waits for a fresh preview. Never sells anything. |
 | `tidycloset` | Preview. Writes rules for closet items that have none, then tallies. Moves nothing. |
 | `tidycloset go` | Live, one-off. Empties the closet into inventory and runs the tidy pipeline. Refuses unless the closet preview ran the same UTC day and a plain `tidy` preview has been run; both checks come before the closet is emptied. Rules the closet preview wrote are held like any other new rule, so the closet's new kinds sell after the next day's preview, not the same day. If a later step stops the run, the closet stays in your inventory; fix the cause and run `tidy go`. |
 
@@ -98,14 +100,14 @@ reason; cheaper seasonal stock is yours to mark.
 For an item with no rule yet, in this order:
 
 - Untradeable: **KEEP**.
-- On your keep list (see below), a piece of one of your saved outfits, or familiar equipment: **keep that many** (the keep-list count; otherwise 3 for accessories, 1 for anything else, plus any copies in your closet, because closet copies count toward Philter's keep and the copy you wear must never be the extra) and sell extras, unless the extras are worth `tidy_keepAbove` each, then KEEP.
+- On your keep list (see below), a piece of one of your saved outfits, or familiar equipment: **keep that many** (the keep-list count; otherwise 3 for accessories, 1 for anything else, plus any copies in your closet, because closet copies count toward Philter's keep and the copy you wear must never be the extra) and sell extras, unless the extras are worth `tidy_keepAbove` each or have no mall price at all, then KEEP.
 - Already in your mall store: **KEEP** (you priced it; you decide whether tidy tops it up. Change the rule to MALL and it will, at your price).
 - Also in your display case: **KEEP**.
 - Philter's default ruleset says something other than sell: **KEEP**.
 - An HP/MP restorative (mafia's own list, shipped as `data/tidy_restores.txt`): **KEEP**.
 - The lazyman rule, only if you turned it on: mall price at or below `tidy_junkBelow` and it has an autosell value: **AUTO**, gear and consumables included.
 - A potion, food, booze or spleen item: **KEEP** while `tidy_sellConsumables` is false (the default). You know which ones you use.
-- Gear or a reusable tool: **KEEP**, except cheap duplicates (under 10,000 meat each, more than you can wear plus what is in your closet): keep what you can wear plus the closet copies and sell the rest, or autosell the rest if they sit at the 100-meat floor.
+- Gear or a reusable tool: **KEEP**, except cheap duplicates (under `tidy_keepAbove` each, more than you are wearing, or could wear, plus what is in your closet): keep the worn or wearable copies (3 for accessories, else 1, or more if you are wearing more, as with two of one weapon) plus the closet copies and sell the rest, or autosell the rest if they sit at the 100-meat floor and have an autosell value (with none, they stay).
 - No mall price at all: **KEEP**.
 - Worth `tidy_keepAbove` (default 10,000 meat) or more per copy, any count: **KEEP**. Valuable stock is yours to decide.
 - Mall price at the 100-meat floor: **AUTO** (autosell) if it has an autosell value, else KEEP.
@@ -116,7 +118,8 @@ KEEP is written as KEEP for now and becomes **CLST** only when `tidycloset go`
 runs (put back in the closet, keeping what is out of the closet at that
 moment: your bag, plus anything you or a familiar are wearing); written as
 CLST while the closet is still full, an ordinary `tidy go` would closet your
-bag copies. Items that grant a skill always stay in the closet. Cheap gear
+bag copies. Items that grant a skill are never sold: the preview writes KEEP
+for them too, and they become CLST on the live run like the rest. Cheap gear
 stacks in the closet stay too: the generator keeps what you can wear plus the
 closet copies, so the closet run does not liquidate duplicate gear.
 Existing KEEP rules on closet items are converted the same way so the closet
@@ -132,7 +135,11 @@ Your edits in Philter Manager stick. Every run, tidy only:
   equipment, or keep-list item, if it is lower than what you can wear plus your
   closet copies, or than the listed count; and on any MALL or AUTO rule for gear
   you or a familiar are wearing, to cover the worn plus closet copies, so
-  Philter never strips worn gear on tidy's watch;
+  Philter never strips worn gear on tidy's watch. One floor, applied every
+  run, when a held rule is released, and to the top-up: the live run writes
+  it, the preview reports it and works from it. A hand-set count below the
+  floor is raised back and the preview says so; to sell a worn copy, unequip
+  it first;
 - **turns CLAN, GIFT and DISC rules into KEEP** while `tidy_allowGiving` is
   false, and prints each one;
 - **sets the keep-count** on drip-list items to what you have on hand (bag,
@@ -145,7 +152,7 @@ Your edits in Philter Manager stick. Every run, tidy only:
   `data/tidy_hold_<name>.txt`, not in the rule, so saving in Philter Manager
   cannot erase it; if you change a held rule's keep-count by hand, the hold is
   dropped and your number stands (a raise tidy itself makes for a keep-list or
-  outfit count is not a hand change);
+  outfit count, or for worn and closet copies, is not a hand change);
 - on `tidycloset go` only, **turns KEEP into CLST** for items that are in the
   closet, so they go back there instead of flooding your inventory. The closet
   preview shows which ones and changes nothing.
@@ -156,8 +163,10 @@ will honour it every day after. The whole file is rewritten in a clean
 five-column form on each save (some editors strip trailing tabs, which crashes
 Philter's loader). Mafia reads and writes that file with backslash escapes, so
 keep backslashes out of a rule's text columns. A copy of the file as it was before the run's first change (taken after it has
-been read and checked) is kept as `.prev`, so `tidy revert` undoes the whole
-run; a run that changes nothing leaves `.prev` alone.
+been read and checked) is kept as `.prev`, with the hold records' copy beside
+it, so `tidy revert` undoes the whole run; a run that changes neither file
+leaves both copies alone. A run that only drops a hold moves them too, and a
+revert then puts the record back and leaves the identical rule file as it is.
 
 ## The lazyman rule (`tidy_junkBelow`), explained fully
 
@@ -192,11 +201,11 @@ Set these in the gCLI with `set name = value`.
 | `tidy_reprice` | down | `down`: never raises a price you set, and never chases a market that collapsed to the 100-meat floor. `both`: follows the market in either direction, with the same daily cap and a fresh search before any change. `off`: never reprices. |
 | `tidy_protectAbove` | 1000000 | Listings priced above this, or whose market price is above this, are never repriced (your hand-set prices). Set to `0` to turn the guard off and reprice everything. Listings parked at 999,999,999 or more are left alone either way. |
 | `tidy_maxCutPct` | 30 | The most the daily reprice may cut one listing in one day, as a percent of its current price. A few cheap units dumped by someone else for an afternoon cannot drag your listing to the floor in one run; if the market really stays there, the rest of the way comes on later days. |
-| `tidy_holdNewDays` | 1 | Any run that writes a new MALL or AUTO rule (a preview, the first run, the closet preview or a live run) holds everything on hand (bag, closet and worn copies, counted the way Philter counts, plus anything picked up during the hold) for this many days, so nothing ever sells on a rule the same run that wrote it. The hold is also released only after a preview has run to the end on a later day than the rule was written: the preview lists every held rule with what would sell, and that is the look. A chained `garbo; tidy go`, or `tidy; tidy go` on the same day, with nobody looking keeps the hold. A day here is a UTC calendar day (for US evening players a new day starts at 7 or 8 pm), read once at the start of each run, so a run that straddles midnight cannot count as its own later-day look. When a hold is released, one fresh mall search checks the price the rule was decided on (recorded with the hold); the rule stays on hold, and says so, if the market has left the band the decision came from: an AUTO decision now worth more than twice the floor and more than your lazyman number, a MALL decision whose price has at least doubled and reached `tidy_keepAbove`, or nothing listed at all. Set the rule you want in Philter Manager to end such a hold. Drip listings skip a held rule too. `0` turns the hold off. |
+| `tidy_holdNewDays` | 1 | Any run that writes a new MALL or AUTO rule (a preview, the first run, the closet preview or a live run) holds everything on hand (bag, closet and worn copies, counted the way Philter counts, plus anything picked up during the hold) for this many days, so nothing ever sells on a rule the same run that wrote it. The hold is also released only after a preview has run to the end on a later day than the rule was written: the preview lists every held rule with what would sell, and that is the look. A chained `garbo; tidy go`, or `tidy; tidy go` on the same day, with nobody looking keeps the hold. A day here is a UTC calendar day (for US evening players a new day starts at 7 or 8 pm), read once at the start of each run, so a run that straddles midnight cannot count as its own later-day look. When a hold is released, one fresh mall search (in the live run; a preview reads the session's cache) checks the price the rule was decided on (recorded with the hold); the rule stays on hold, and says so, if the market has left the band the decision came from: an AUTO decision now worth more than twice the floor and more than your lazyman number, a MALL decision whose price has at least doubled and reached `tidy_keepAbove`, or nothing listed at all. Set the rule you want in Philter Manager to end such a hold; until then it is searched again on each later live run. The release keeps at least the worn plus closet copies, like every other run. Drip listings skip a held rule too. `0` turns the hold off. |
 | `tidy_junkBelow` | off | **The lazyman rule.** Off unless you set it above 100. At `1000`, every new item kind with a mall price of 1,000 meat or less and an autosell value starts as AUTO, gear and consumables included, the way a hand pass of "autosell anything under 1k" would. Everything above it in the list ("How rules get decided") still wins: untradeables, outfit pieces and keep-list items, store and display-case items, Philter's default KEEPs, and restoratives are never touched by it. Read that list before turning this on: it is the one setting that sells gear. |
 | `tidy_sellConsumables` | false | While false, potions (anything usable that grants an effect), food, booze and spleen items with no rule start as KEEP. Set true and they follow the normal rules (floor junk autosells, the rest goes to the mall). |
 | `tidy_allowGiving` | false | While false, any CLAN, GIFT or DISC rule is turned into KEEP each run, so nothing goes to the clan stash, to another player, or into the void. |
-| `tidy_priceFactor` | 1.0 | Multiplies the market price when repricing and when pricing a fresh drip lot. `0.99` lists 1% under it (10 meat on a 1,000-meat item, 10,000 on a 1,000,000-meat item) so you get the sale first. KoL's floor and the rule's minimum price still apply. Only a listing above market is cut; one already at or under market is left alone, because the market figure counts your own units and cutting there would chase your own price down 1% a day. |
+| `tidy_priceFactor` | 1.0 | Multiplies the market price when repricing and when pricing a fresh drip lot. Must be between 0.5 and 1.0; anything else stops the run, because a slipped digit like 0.01 would list everything at 1% of market. `0.99` lists 1% under it (10 meat on a 1,000-meat item, 10,000 on a 1,000,000-meat item) so you get the sale first. KoL's floor and the rule's minimum price still apply. Only a listing above market is cut; one already at or under market is left alone, because the market figure counts your own units and cutting there would chase your own price down 1% a day. |
 | `tidy_priceJitter` | 0 | Random spread around the factor, so your prices are not a fixed pattern a rival can read. `0.01` with factor `0.99` draws a factor between 0.98 and 1.00 per item per day. A listing already inside that band is left alone, so this does not churn your whole store daily. Capped at 0.25. |
 | `tidy_rulesSuffix` | (empty) | Testing only. Use `OCDdata_<name><suffix>.txt` (and the matching keep, pin, drip, hold and state files) instead of your real ones. Live runs are refused while it is set, and nothing a suffixed run records can arm the real holds. |
 | `tidy_dataFile` | (your name) | The Philter rule file tidy works on, `OCDdata_<this>.txt`. Set it if you keep one Philter file for several characters; tidy tells you when Philter's own setting points somewhere else. |
@@ -244,7 +253,8 @@ pocket wish	5
 from scripts (it is anti-mallbot policy in mafia itself): the price a script can
 see is the 5th-cheapest unit, counting per-buyer limits. That is what tidy
 uses. A preview works from the session's cached prices (one search per item
-per session); the live run searches fresh before it changes anything. At factor 1.0 you sit at or
+per session), the release check included; the live run searches fresh before
+it changes anything. At factor 1.0 you sit at or
 above the cheapest sellers and never start a price war. With a factor under 1.0
 you list below that number, which may or may not undercut the real cheapest
 seller. Your call. It only ever applies to a listing that sits above market:
@@ -320,13 +330,27 @@ CLST only on the live run; worn gear of any kind is kept inside a sell rule's
 keep-count every run; a revert right after a first run is refused; the
 take-backs for outfit pieces and familiar gear are no longer satisfied by
 closet copies. Upgrading users need one fresh preview before their next
-`tidy go`.
+`tidy go`. A seventh review found that the release of a held rule put the
+day-old keep-count back after the worn-gear raise, so on release day a cheap
+hat you were wearing, with its spares in the closet, could still be taken off
+you and sold; that the same raise on a held rule read as a hand edit and
+dropped the hold; that a run which only dropped a hold overwrote the undo
+copy and locked `tidy revert`; that a rule decided with nothing listed wrote a
+hold record tidy could not read back; that a revert on an install from before
+the hold copy existed emptied the hold file; and that the release check
+searched the mall fresh in previews. All fixed: one keep-count floor (the
+worn plus closet copies, or the outfit and keep-list minimum) is used by the
+keep-count check, the hold check, the release, the drip and the top-up;
+revert compares both files and never replaces hold records with nothing;
+previews use the cache throughout. The familiar fetch went with it: a sell
+rule on gear anyone is wearing is raised before the top-up, so there is
+nothing left for Philter or tidy to fetch.
 
 - Aftercore only (refuses in Ronin or Hardcore).
 - Refuses until Hagnk's has been emptied this ascension (`pull all`).
 - Forces Philter's `BaleOCD_EmptyCloset` to -1 so Philter never dumps your closet on its own.
-- The first time a run writes your rule file it copies the file as it was to `OCDdata_<name>.prev.txt`, after it has been read and checked; a run that writes nothing leaves the previous copy alone, so `tidy revert` always undoes the last run that changed something. If that copy cannot be written, the run stops before changing anything.
-- A rule file that exists but does not parse is never overwritten; tidy stops and tells you. So does a file with lines a rewrite would drop (no tab in the line, an item this KoLmafia does not know, the same item twice) or quietly change (a keep-count that is not a plain number: `x` would become 0 and `5k` would become 5; an empty action; a MALL minimum price that is not a number): tidy names the first such line and changes nothing.
+- The first time a run writes your rule file or the hold records it copies both as they were to `OCDdata_<name>.prev.txt` and `tidy_hold_<name>.prev.txt`, after the rule file has been read and checked; a run that writes neither leaves the copies alone, so `tidy revert` always undoes the last run that changed something. If a copy cannot be written, the run stops before changing anything; if the rule file cannot be written after the records were, the records go back to their copy.
+- A rule file that exists but does not parse is never overwritten; tidy stops and tells you. So does a file with lines a rewrite would drop (no tab in the line, an item this KoLmafia does not know, the same item twice) or quietly change (a keep-count that is not a plain number: `x` would become 0 and `5k` would become 5000; an empty action; a MALL minimum price that is not a number): tidy names the first such line and changes nothing.
 - Live runs are refused while `tidy_rulesSuffix` is set. Philter is pointed at tidy's rule file only for the moment it runs and back at exactly whatever it was straight after, so neither Philter nor its Manager is left looking at a test file. If a run that stopped early left Philter on a test name, the next run says so and tells you the one-line fix.
 - `tidy help` never stops on a broken setting; it shows the setting as typed and says so.
 - Philter's own simulation switch is put back the way you had it after tidy has run Philter.
@@ -334,13 +358,13 @@ closet copies. Upgrading users need one fresh preview before their next
 - A preview reports the keep-count patches it would make without writing them, so nothing a preview saves carries an unreported change.
 - The preview record, the reset backup name and the inherited-file notice live in `data/tidy_state_<name>.txt` next to the rules, not in mafia preferences, so a run under the test suffix cannot arm real holds and two mafia installs sharing one data folder see the same record.
 - The hold file is checked line by line before any hold is released or written; if a line cannot be read, the run stops with every hold kept. Every run that changes the rule file keeps the hold records' previous version next to `.prev`, and `tidy reset` backs them up with the dated rule backup.
-- `tidy revert` refuses to restore a copy that holds no readable rules.
-- A setting that is not a plain whole number (`off`, `-1`, `1,000`, more than 15 digits) stops the run instead of silently becoming 0 and switching a guard off.
+- `tidy revert` refuses to restore a copy that holds no readable rules, and never replaces hold records with an empty copy (an install upgraded from before the hold copy existed has none).
+- A setting that is not a plain whole number (`off`, `-1`, `1,000`, more than 15 digits) stops the run instead of silently becoming 0 and switching a guard off. So does a price factor outside 0.5 to 1.0.
 - A preview only counts as a preview if Philter's simulation ran to the end.
 - Before changing any price, in either direction, the live run confirms with a fresh mall search, and never moves a listing more than `tidy_maxCutPct` in a day. A MALL rule's own minimum price (the fourth column, set in Philter Manager) is never undercut, by the reprice or by a drip lot. The reprice day is written to `data/tidy_state_<name>.txt` before the first change, so a run that stops halfway cannot cut a listing twice, and neither can two mafia installs sharing one data folder. A listing whose reprice failed is left for tomorrow.
 - A listing already at or under market is never cut, whatever the price factor.
 - A rule tidy wrote, in any run, cannot sell until a preview has run on a later UTC day and listed it with what would sell (`tidy_holdNewDays`). The hold, the store top-ups and the drip keep-counts all count bag + closet + worn copies, the way Philter does. "Worn" includes equipment on every familiar in your terrarium, which Philter counts and will take off them.
-- tidy takes an item off a familiar (a benched one without switching to it, and benched ones before the active one; ordinary gear on a Hatrack or a Hand counts too, whether the familiar is active or benched) only when a rule (yours, or one tidy wrote and you have had a day to see) tells Philter to sell copies beyond the keep-count, and only so those copies list at your price; Philter would have taken them anyway. Philter also takes worn gear off *you*, which tidy never does: for a listing in your store the preview warns and the live run stops before Philter, telling you to raise the keep-count or unequip. For items not in your store, Philter's own rule applies; tidy's generator never writes such a rule (it counts closet copies inside the keep), and every run raises the keep-count on any sell rule for gear you or a familiar are wearing to cover the worn and closet copies, so a rule you wrote cannot strip you either. If familiar equipment is locked and your active familiar wears the item, or a familiar will not give the item up, tidy stops too. A preview sells nothing, but Philter's own simulation can move such copies into your bag (see DESIGN.md, known limits).
+- tidy never takes gear off you or off a familiar, and never sells a worn copy. Philter strips worn gear (yours, or a familiar's; ordinary gear on a Hatrack or a Hand included) whenever a sell rule's keep-count sits below the worn plus closet copies, in simulation as much as live, and re-lists what it took at market. So every run raises the keep-count on any MALL or AUTO rule for such gear to that floor before anything else happens (the preview reports the raise and works from it, the live run writes it), the release of a held rule keeps the same floor, the drip keep-count sits on it, and the store top-up sends bag copies only. If a rule somehow still sat below the floor at top-up time, the run stops before Philter and says so. To sell a worn copy, unequip it first. A preview sells nothing, but Philter's own simulation can still move copies covered by a hand-written rule below the floor into your bag, until the next run raises it (see DESIGN.md, known limits).
 - If a store price cannot be read, a top-up fails, a take-back fails, or any reprice fails, tidy stops before Philter runs.
 - Drip listings only ever list items whose rule says MALL.
 
