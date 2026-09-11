@@ -264,8 +264,10 @@ void hold_new_rule(item it, OCDinfo r, int decidedQ) {
 	r.q = on_hand(it);
 	HOLDS[it] = RUN_DAY + " " + decidedQ + " " + r.q; HOLDS_CHANGED = true;
 }
+void snapshot_rules();   // defined below
 void save_holds(string tag) {
 	if (!HOLDS_CHANGED) return;
+	snapshot_rules();   // the hold file is written before the rule file, so the run's undo point (both files) is taken here
 	if (!map_to_file(HOLDS, HOLD_FILE)) abort(tag + "could not write " + HOLD_FILE + ". Stopping before anything is sold.");
 	HOLDS_CHANGED = false;
 }
