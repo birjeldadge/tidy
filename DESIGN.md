@@ -371,6 +371,12 @@ the destructive step.
   CLST keep 1 on the worn leash was raised to 4; the pointer notice with a
   stale name offered the zlib line and not the tidy_dataFile one. The
   card-sleeve gate is verified by reading (the author wears no sleeve).
+- Ninth review (stricter bar: catastrophic items and regressions only): one
+  regression, the closet run leaving worn gear's closet copies in the bag
+  under the raised CLST count. The closet preview printed the "for this run"
+  re-derivation for a staged CLST rule on the leash; the live half of the
+  branch is `tidycloset go` only, refused under the test suffix, and is
+  verified by reading.
 
 ## Known limits
 
