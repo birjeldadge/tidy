@@ -38,15 +38,16 @@ each new item rather than a blanket answer.
    CLAN, GIFT, PULV, DISP, MAKE, USE, UNTN or BREAK rules it inherited.
 4. CLAN, GIFT and DISC rules become KEEP (unless `tidy_allowGiving`), each one
    printed.
-5. Keep-count check: every MALL/AUTO rule is raised to its floor, the outfit,
-   familiar-equipment or keep-list minimum, or the copies worn by you or any
-   familiar plus the closet copies, whichever is higher (the live run writes
-   the raise, the preview reports it and works from it); and copies of outfit
-   pieces, familiar equipment and keep-list items come back from the store if
-   fewer than the minimum are on hand.
-6. Held rules from earlier runs: released, at the higher of the decided
-   keep-count and today's floor, if the wait is over and a preview has run on
-   a later day; otherwise listed, with what would sell.
+5. Keep-count check: every MALL, AUTO or CLST rule is raised to its floor, the
+   outfit, familiar-equipment or keep-list minimum, or the copies worn by you
+   or any familiar plus the closet copies, whichever is higher (previews write
+   it too, because Philter's simulation strips worn gear as readily as the
+   live run); and copies of outfit pieces, familiar equipment and keep-list
+   items come back from the store if fewer than the minimum are on hand.
+6. Held rules from earlier runs: a live run releases them, at the higher of
+   the decided keep-count and today's floor, if the wait is over and a preview
+   has run on a later day, after one fresh price check each; a preview only
+   lists them, with what would sell.
 7. Rules for new item kinds, using the generator below; the MALL and AUTO ones
    go on hold, in a preview as much as in a live run.
 8. Daily reprice of the store (see pricing).
@@ -93,9 +94,10 @@ the hold. The fourth review found the hold covered only live-written rules, so
 the first run and a same-day `tidy; tidy go` sold on machine decisions. The
 fifth found the day was read from the clock at six places, so a preview that
 straddled 00:00 UTC recorded itself as a later-day look at its own rules; the
-day is now read once per run. At release, one fresh search (in the live run;
-a preview reads the session cache) re-checks the price the decision came
-from, and a rule that now looks wrong stays on hold; the release also keeps
+day is now read once per run. Only a live run releases a hold (the eighth
+review found a preview could release one on a cached price), and one fresh
+search first re-checks the price the decision came from; a rule that now
+looks wrong stays on hold; the release also keeps
 the keep-count floor of the day (worn plus closet copies), which the seventh
 review found it did not. So a spoofed or
 transient market price can never turn a new item into a sale before a human
@@ -179,9 +181,9 @@ no-op), never below that floor or below the rule's own minimum price (Philter
 Manager's minimum column), never touch listings above `tidy_protectAbove`
 (1,000,000) or parked at 999,999,999+. `both` follows the market either way,
 under the same daily cap and with a fresh search before any change; `off`
-skips repricing. A preview uses the session's cached prices throughout, the
-release check included, so repeated previews do not hammer the mall; the live
-run searches fresh. The reprice day
+skips repricing. A preview uses the session's cached prices throughout, and
+never releases a hold, so repeated previews do not hammer the mall; the live
+run searches fresh, the release check included. The reprice day
 lives in `data/tidy_state_<name>.txt`, written before the first change: a
 preference would be per mafia install, and two installs on one synced data
 folder (a real layout) would each cut once. `tidy_priceFactor` under
@@ -214,9 +216,10 @@ its first write of either file, so a revert undoes the whole run and a run
 that wrote nothing does not move the undo point. Revert refuses only when
 both copies match the current files; a run that only dropped a hold leaves
 the rule file identical, and revert then restores the record and leaves the
-file as it is. It never replaces hold records with an empty copy: a script
-cannot tell a missing file from an empty one, and an install upgraded from
-before the hold copy existed has none.
+file as it is. The hold copy starts with a marker line, so revert can tell
+"no holds then" (restored as such) from "no copy at all" (a missing or empty
+file: an install upgraded from before the copy existed; the records are
+kept).
 Neither sells anything. A rule file that exists but does not parse is never
 overwritten, and the `.prev` copy is taken after that check, not before: the
 second review found the old order let the very file the check catches destroy
@@ -358,6 +361,16 @@ the destructive step.
   printed; the closet preview wrote 618 rules with no CLST among them, the 34
   skill-granting closet items included. The negative decision price and the
   failed-write hold restore are verified by reading.
+- Eighth review, probed under the test suffix with the same four leashes on
+  benched familiars: a preview with a MALL keep 2 on the leash (worn 4) wrote
+  keep 4 before Philter's simulation ran, the record followed, and nobody was
+  unequipped; a due, previewed hold was listed as "releases on the next tidy
+  go" and left on file by the preview, with no mall search; the hold copy
+  starts with its marker line, and after a run that dropped the last hold two
+  reverts in a row restored the record and then the genuine empty state; a
+  CLST keep 1 on the worn leash was raised to 4; the pointer notice with a
+  stale name offered the zlib line and not the tidy_dataFile one. The
+  card-sleeve gate is verified by reading (the author wears no sleeve).
 
 ## Known limits
 
@@ -368,10 +381,19 @@ the destructive step.
   below the number of copies you or your familiars are wearing, Philter's cleanup
   fetches them into your bag (off your familiars and off you) before it checks
   the simulation switch, so a tidy preview can move worn gear into your bag.
-  Nothing is sold. tidy's keep-count floor for worn gear, applied every run
-  and at release, means its own rules never trigger this; a hand-written
-  keep-count below the worn count can, until the next run raises it (the
-  preview reports the raise, the live run writes it).
+  Nothing is sold. tidy writes its keep-count floor for worn gear in every
+  run, previews included, before Philter runs, and keeps it at release, so
+  neither its own rules nor a hand-written keep-count below the worn count
+  reach the simulation with a count under it (the eighth review found the
+  preview used to report the raise without writing it, and the simulation
+  then stripped the copy the next live run sold).
+- A hold record with no decision price (nothing was listed when the rule was
+  written, or the record predates the price column) skips the doubled-price
+  test at release; the other checks still run.
+- Philter's fetch for a card in the card sleeve, a codpiece gem or a holstered
+  sixgun cannot be met by an unequip; with mafia's `autoSatisfyWithMall` on
+  (off by default) Philter would buy the copy. tidy's floor counts those
+  items too, so its own rules never get there.
 - A release day costs one fresh mall search per released rule in the live run
   (a preview uses the session cache), a rule that stays held by the price
   check is searched again on each later live run, and a first run costs up to
