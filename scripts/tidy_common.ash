@@ -785,7 +785,7 @@ int closet_bootstrap(OCDinfo [item] rules, int [item] closet, string tag, boolea
 	cli_execute("refresh shop");
 	int [item] shop = get_shop();
 	boolean [item] pieces = outfit_piece_set();
-	int added = 0; int converted = 0; int heldNew = 0; int holdDays = hold_new_days();
+	int added = 0; int converted = 0; int relowered = 0; int heldNew = 0; int holdDays = hold_new_days();
 	foreach it, n in closet {
 		if (rules contains it) {
 			if (rules[it].action == "KEEP") {
@@ -793,6 +793,20 @@ int closet_bootstrap(OCDinfo [item] rules, int [item] closet, string tag, boolea
 				int keepOut = item_amount(it) + equipped_amount(it, true);   // what is out of the closet now (bag, you, your familiars) stays out
 				if (apply) { rules[it].action = "CLST"; rules[it].q = keepOut; }
 				print("  " + it + ": KEEP -> CLST keep " + keepOut + " (closet copies go back to the closet)" + (apply ? "" : " [applied on the live run]"), "black");
+			}
+			else if (rules[it].action == "CLST" && rules[it].q == keep_floor(it, pieces)) {
+				// a CLST rule on gear you or a familiar wear sits at tidy's floor (worn + closet copies), which is right every day
+				// but wrong on the one day the closet is emptied: the closet copies would then be inside the keep and stay in
+				// the bag for good. For this run only, the keep-count is what is out of the closet right now (never under the
+				// keep-list or outfit minimum); the next day's run raises it to the floor again once the copies are closeted.
+				// the minimum as it will stand once the closet is empty: protect_min() counts closet copies while they are there
+				int minAfter = ((KEEP_LIST contains it) && KEEP_LIST[it] > 0) ? KEEP_LIST[it] : (is_protected_gear(it, pieces) ? gear_slots(it) : 0);
+				int keepOut = max(item_amount(it) + equipped_amount(it, true), minAfter);
+				if (keepOut < rules[it].q) {
+					relowered += 1;
+					if (apply) rules[it].q = keepOut;
+					print("  " + it + ": CLST keep " + rules[it].q + " -> keep " + keepOut + " for this run, so the closet copies go back" + (apply ? "" : " [applied on the live run]"), "black");
+				}
 			}
 			continue;
 		}
@@ -807,10 +821,10 @@ int closet_bootstrap(OCDinfo [item] rules, int [item] closet, string tag, boolea
 		print("  " + n + " " + it + "  ->  " + r.action + (r.q > 0 ? " keep " + r.q : "") + ((HOLDS contains it) ? "   [held]" : "") + ((r.action == "KEEP" && !apply) ? "   (becomes CLST keep " + (item_amount(it) + equipped_amount(it, true)) + " when tidycloset go runs)" : ""), (r.action == "CLST" || r.action == "KEEP") ? "green" : "black");
 	}
 	save_holds(tag);
-	if (added > 0 || (apply && converted > 0)) save_rules(rules);
+	if (added > 0 || (apply && converted + relowered > 0)) save_rules(rules);
 	if (heldNew > 0) print(tag + heldNew + " new MALL/AUTO closet rule" + (heldNew == 1 ? " is" : "s are") + " on hold: nothing sells on them until a preview on a later day has listed them.", "olive");
-	if (added + converted > 0)
-		print(tag + "wrote " + added + " new closet rules; " + converted + " KEEP rules " + (apply ? "converted" : "would be converted") + " to CLST" + (apply ? "" : " when tidycloset go runs") + " (previous file saved as " + BACKUP_FILE + "). Review them in Philter Manager before running tidycloset go.", "blue");
+	if (added + converted + relowered > 0)
+		print(tag + "wrote " + added + " new closet rules; " + converted + " KEEP rules " + (apply ? "converted" : "would be converted") + " to CLST" + (relowered > 0 ? "; " + relowered + " CLST keep-counts on worn gear " + (apply ? "set" : "would be set") + " to what is out of the closet for this run" : "") + (apply ? "" : " when tidycloset go runs") + " (previous file saved as " + BACKUP_FILE + "). Review them in Philter Manager before running tidycloset go.", "blue");
 	return added + converted;
 }
 
@@ -1100,7 +1114,7 @@ void tidy_run(boolean sim) {
 	if (released > 0) print(tag + released + " rule" + (released == 1 ? "" : "s") + " written by an earlier run " + (released == 1 ? "is" : "are") + " past the " + holdDays + "-day hold, previewed since, and can sell now.", "blue");
 	if (ready > 0) print(tag + ready + " held rule" + (ready == 1 ? " is" : "s are") + " past the hold and previewed on a later day: the next tidy go releases " + (ready == 1 ? "it" : "them") + " after one fresh price check each (a preview never releases a hold).", "olive");
 	if (unseen > 0) print(tag + unseen + " held rule" + (unseen == 1 ? " is" : "s are") + " past the hold but no preview has run since " + (unseen == 1 ? "it was" : "they were") + " written. " + (sim ? "This preview counts: they sell on the next tidy go." : "Nothing sells on them until you run a plain tidy and look."), "olive");
-	if (stillHeld > unseen) print(tag + (stillHeld - unseen) + " new-kind rule" + (stillHeld - unseen == 1 ? "" : "s") + " still inside the " + holdDays + "-day hold. Review in Philter Manager or in the lines above.", "olive");
+	if (stillHeld > unseen + ready) print(tag + (stillHeld - unseen - ready) + " new-kind rule" + (stillHeld - unseen - ready == 1 ? "" : "s") + " still inside the " + holdDays + "-day hold. Review in Philter Manager or in the lines above.", "olive");
 
 	// ---- new item kinds
 	int added = 0; int addMall = 0; int addAuto = 0; int addKeep = 0; int held = 0;
@@ -1146,9 +1160,10 @@ void tidy_run(boolean sim) {
 		// Philter's excess is (bag + closet + worn) - keep-count. It takes that from the bag and fetches the rest itself, off
 		// any familiar wearing the item and off YOU (never out of the closet: Philter forces autoSatisfyWithCloset off while it
 		// runs, so closet copies count but stay put), and lists whatever it fetched at market, which KoL applies to the whole
-		// listing (your price is gone). The keep-count check above has already raised every sell rule to cover worn and
-		// closet copies (a preview reports the raise without writing it, so it is applied here in memory), so the excess is
-		// bag copies only and nothing is worn beyond the keep. If that ever fails to hold, stop rather than let Philter strip.
+		// listing (your price is gone). The keep-count check above has already written every sell rule's keep-count at or
+		// above the floor (worn + closet copies), in previews too, so the excess is bag copies only and nothing is worn
+		// beyond the keep. The stop below is therefore unreachable today (keep_floor and the test count "worn" the same way);
+		// it stays as a guard for the next edit that makes them disagree, rather than let Philter strip.
 		int q = max(rules[it].q, keep_floor(it, pieces));
 		int wanted = on_hand(it) - q;
 		if (wanted <= 0) continue;

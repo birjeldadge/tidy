@@ -46,7 +46,7 @@ Nothing runs live without the word `go`.
 | `tidy reset` | Clean sweep. Backs up your rule file as `OCDdata_<name>.before-reset-<date>-<time>.txt`, then runs the first-run preview: a fresh rule for every item kind in your inventory, nothing sold. `tidy go` is refused until you have run a plain `tidy` and looked. The dated backup stays the target of `tidy revert` until your first live run on the new rules; after that, revert goes back to undoing the last run. For people who picked up Philter years ago and cannot remember what they decided. |
 | `tidy revert` | Undo. Right after a reset it restores the dated backup. Otherwise it swaps in the `.prev` copy taken by the last run that changed the file; run it again to swap back (only if no run has written the file in between). The hold records travel with the rules in both cases. Refuses a copy that holds no readable rules, or one identical to the current file with the hold records matching too (nothing to go back to); when only the hold records differ, they are restored and the rule file is left as it is. The hold copy carries a marker line, so revert can tell "no holds then" (restored as such) from "no copy at all" (the records are kept). After any revert, `tidy go` waits for a fresh preview. Never sells anything. |
 | `tidycloset` | Preview. Writes rules for closet items that have none, then tallies. Moves nothing. |
-| `tidycloset go` | Live, one-off. Empties the closet into inventory and runs the tidy pipeline. Closet copies of gear you or a familiar wear come out too and stay inside the keep-count, so they are not liquidated. Refuses unless the closet preview ran the same UTC day and a plain `tidy` preview has been run; both checks come before the closet is emptied. Rules the closet preview wrote are held like any other new rule, so the closet's new kinds sell after the next day's preview, not the same day. If a later step stops the run, the closet stays in your inventory; fix the cause and run `tidy go`. |
+| `tidycloset go` | Live, one-off. Empties the closet into inventory and runs the tidy pipeline. Closet copies of gear you or a familiar wear go back to the closet with the rest: for this run only, such a CLST keep-count is set to what is out of the closet at that moment (the next day's run raises it again once the copies are closeted); a MALL or AUTO keep-count on worn gear is not lowered, so those closet copies come out and stay in your bag inside the keep. Refuses unless the closet preview ran the same UTC day and a plain `tidy` preview has been run; both checks come before the closet is emptied. Rules the closet preview wrote are held like any other new rule, so the closet's new kinds sell after the next day's preview, not the same day. If a later step stops the run, the closet stays in your inventory; fix the cause and run `tidy go`. |
 
 `tidysim` and `tidyclosetsim` are older names for the two previews and still work.
 
@@ -253,8 +253,8 @@ pocket wish	5
 from scripts (it is anti-mallbot policy in mafia itself): the price a script can
 see is the 5th-cheapest unit, counting per-buyer limits. That is what tidy
 uses. A preview works from the session's cached prices (one search per item
-per session), the release check included; the live run searches fresh before
-it changes anything. At factor 1.0 you sit at or
+per session) and never releases a hold; the live run searches fresh before
+it changes anything, the release check included. At factor 1.0 you sit at or
 above the cheapest sellers and never start a price war. With a factor under 1.0
 you list below that number, which may or may not undercut the real cheapest
 seller. Your call. It only ever applies to a listing that sits above market:
@@ -330,7 +330,12 @@ CLST only on the live run; worn gear of any kind is kept inside a sell rule's
 keep-count every run; a revert right after a first run is refused; the
 take-backs for outfit pieces and familiar gear are no longer satisfied by
 closet copies. Upgrading users need one fresh preview before their next
-`tidy go`. An eighth review found that a preview reported the worn-gear
+`tidy go`. A ninth review, run to a stricter bar (catastrophic items and
+regressions only), found nothing catastrophic and one regression from the
+eighth's fixes: raising closet (CLST) keep-counts to the worn-gear floor was
+right every day but wrong on the day `tidycloset go` empties the closet, so
+the spares of worn gear stayed in the bag; the closet run now sets such a
+count to what is out of the closet for that run only. An eighth review found that a preview reported the worn-gear
 raise without writing it, so Philter's simulation stripped the worn copy
 into your bag and the next live run sold it; that a preview could release a
 hold on a cached price, so the fresh search never happened; that a card in
@@ -368,7 +373,7 @@ nothing left for Philter or tidy to fetch.
 - A preview writes the keep-count floor (and prints every raise) before Philter's simulation runs, because the simulation itself strips worn gear whose keep-count sits below it; nothing else a preview saves carries an unreported change, and a preview never releases a hold.
 - The preview record, the reset backup name and the inherited-file notice live in `data/tidy_state_<name>.txt` next to the rules, not in mafia preferences, so a run under the test suffix cannot arm real holds and two mafia installs sharing one data folder see the same record.
 - The hold file is checked line by line before any hold is released or written; if a line cannot be read, the run stops with every hold kept. Every run that changes the rule file keeps the hold records' previous version next to `.prev`, and `tidy reset` backs them up with the dated rule backup.
-- `tidy revert` refuses to restore a copy that holds no readable rules, and never replaces hold records with an empty copy (an install upgraded from before the hold copy existed has none).
+- `tidy revert` refuses to restore a copy that holds no readable rules. The hold copy starts with a marker line: a copy holding only the marker is a real "no holds then" and is restored as such; a missing or empty copy (an install upgraded from before the copy existed) is "no copy", and the current records are kept.
 - A setting that is not a plain whole number (`off`, `-1`, `1,000`, more than 15 digits) stops the run instead of silently becoming 0 and switching a guard off. So does a price factor outside 0.5 to 1.0.
 - A preview only counts as a preview if Philter's simulation ran to the end.
 - Before changing any price, in either direction, the live run confirms with a fresh mall search, and never moves a listing more than `tidy_maxCutPct` in a day. A MALL rule's own minimum price (the fourth column, set in Philter Manager) is never undercut, by the reprice or by a drip lot. The reprice day is written to `data/tidy_state_<name>.txt` before the first change, so a run that stops halfway cannot cut a listing twice, and neither can two mafia installs sharing one data folder. A listing whose reprice failed is left for tomorrow.
