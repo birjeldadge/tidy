@@ -399,7 +399,12 @@ the destructive step.
 - A CLST keep-count at the floor means "closet every bag copy" of gear you
   wear: "keep N spares out of the closet" cannot be expressed while closet
   copies count toward the keep. The closet run is the one exception, for
-  that run only.
+  that run only: it lowers such a count to the worn copies (or the keep-list
+  count) with no one-copy minimum, so every closet copy of unworn gear goes
+  back. The author's first real closet run on the public script found the
+  earlier version kept one copy of every protected item out, worn or not,
+  because the daily floor sets every such rule to the trigger value; ten
+  pieces of unworn familiar gear stayed in the bag. Fixed the same day.
 - "N would sell" in a preview is the count at preview time; the live release
   sells the count at that moment, copies picked up in between included. The
   rule is what was looked at, not the number.

@@ -795,17 +795,20 @@ int closet_bootstrap(OCDinfo [item] rules, int [item] closet, string tag, boolea
 				print("  " + it + ": KEEP -> CLST keep " + keepOut + " (closet copies go back to the closet)" + (apply ? "" : " [applied on the live run]"), "black");
 			}
 			else if (rules[it].action == "CLST" && rules[it].q == keep_floor(it, pieces)) {
-				// a CLST rule on gear you or a familiar wear sits at tidy's floor (worn + closet copies), which is right every day
-				// but wrong on the one day the closet is emptied: the closet copies would then be inside the keep and stay in
-				// the bag for good. For this run only, the keep-count is what is out of the closet right now (never under the
-				// keep-list or outfit minimum); the next day's run raises it to the floor again once the copies are closeted.
-				// the minimum as it will stand once the closet is empty: protect_min() counts closet copies while they are there
-				int minAfter = ((KEEP_LIST contains it) && KEEP_LIST[it] > 0) ? KEEP_LIST[it] : (is_protected_gear(it, pieces) ? gear_slots(it) : 0);
+				// A CLST rule on protected gear (outfit piece, familiar equipment, keep-list item) sits at tidy's floor, which
+				// counts the closet copies. That is right every day but wrong on the one day the closet is emptied: the closet
+				// copies would then be inside the keep and stay in the bag for good. For this run only, the keep-count is what
+				// is out of the closet right now: the copies you or a familiar wear, or the keep-list count if higher. There is
+				// no one-copy minimum here: a CLST rule never sells, so keeping none in the bag is safe, and the next day's run
+				// raises the count to the floor again once the copies are closeted. (The first version kept one copy of every
+				// such item out, worn or not, which left ten pieces of unworn familiar gear in the bag after a real closet run.)
+				int minAfter = ((KEEP_LIST contains it) && KEEP_LIST[it] > 0) ? KEEP_LIST[it] : 0;
 				int keepOut = max(item_amount(it) + equipped_amount(it, true), minAfter);
 				if (keepOut < rules[it].q) {
 					relowered += 1;
+					int was = rules[it].q;
 					if (apply) rules[it].q = keepOut;
-					print("  " + it + ": CLST keep " + rules[it].q + " -> keep " + keepOut + " for this run, so the closet copies go back" + (apply ? "" : " [applied on the live run]"), "black");
+					print("  " + it + ": CLST keep " + was + " -> keep " + keepOut + " for this run, so the closet copies go back" + (apply ? "" : " [applied on the live run]"), "black");
 				}
 			}
 			continue;
@@ -824,7 +827,7 @@ int closet_bootstrap(OCDinfo [item] rules, int [item] closet, string tag, boolea
 	if (added > 0 || (apply && converted + relowered > 0)) save_rules(rules);
 	if (heldNew > 0) print(tag + heldNew + " new MALL/AUTO closet rule" + (heldNew == 1 ? " is" : "s are") + " on hold: nothing sells on them until a preview on a later day has listed them.", "olive");
 	if (added + converted + relowered > 0)
-		print(tag + "wrote " + added + " new closet rules; " + converted + " KEEP rules " + (apply ? "converted" : "would be converted") + " to CLST" + (relowered > 0 ? "; " + relowered + " CLST keep-counts on worn gear " + (apply ? "set" : "would be set") + " to what is out of the closet for this run" : "") + (apply ? "" : " when tidycloset go runs") + " (previous file saved as " + BACKUP_FILE + "). Review them in Philter Manager before running tidycloset go.", "blue");
+		print(tag + "wrote " + added + " new closet rules; " + converted + " KEEP rules " + (apply ? "converted" : "would be converted") + " to CLST" + (relowered > 0 ? "; " + relowered + " CLST keep-count" + (relowered == 1 ? "" : "s") + " on outfit, familiar or keep-list gear " + (apply ? "set" : "would be set") + " to what is out of the closet for this run" : "") + (apply ? "" : " when tidycloset go runs") + " (previous file saved as " + BACKUP_FILE + "). Review them in Philter Manager before running tidycloset go.", "blue");
 	return added + converted;
 }
 
