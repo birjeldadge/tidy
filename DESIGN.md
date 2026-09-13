@@ -377,6 +377,19 @@ the destructive step.
   re-derivation for a staged CLST rule on the leash; the live half of the
   branch is `tidycloset go` only, refused under the test suffix, and is
   verified by reading.
+- Clan code review (2026-09-13, after release): variable names spelled out,
+  no line over 150 columns, and a note on why `mall_floor` keeps a negative
+  autosell value (mafia reports one for the few items that cannot be autosold
+  but carry a mall minimum other than 100, and its own repricer takes the
+  absolute value for the same reason). No change in behaviour, proven rather
+  than assumed: the old and the new script were installed in turn on the
+  author's account and the `tidy` preview, the `tidycloset` preview, `tidy
+  help` and a first-run preview under a test suffix (every inventory kind
+  through the generator) were diffed; all four were byte-identical, the rule
+  and hold files the first run wrote included. Mafia's `verify` command was
+  run on every script after each edit; it caught the one real slip (ASH
+  identifiers are case-insensitive, so a variable named `decision` collided
+  with the record type `Decision`).
 
 ## Known limits
 
@@ -408,13 +421,12 @@ the destructive step.
 - "N would sell" in a preview is the count at preview time; the live release
   sells the count at that moment, copies picked up in between included. The
   rule is what was looked at, not the number.
-- Hold records come in two shapes (with and without the decision price);
-  both are read, and a record without a price skips the doubled-price test.
+- Hold records come in two shapes, with and without the decision price
+  (nothing was listed when the rule was written, or the record predates the
+  price column); both are read, and a record without a price skips the
+  doubled-price test at release; the other checks still run.
 - The "one fresh preview after upgrading" note in the README is advice, not
   enforced: an install whose state file already says a preview ran keeps it.
-- A hold record with no decision price (nothing was listed when the rule was
-  written, or the record predates the price column) skips the doubled-price
-  test at release; the other checks still run.
 - Philter's fetch for a card in the card sleeve, a codpiece gem or a holstered
   sixgun cannot be met by an unequip; with mafia's `autoSatisfyWithMall` on
   (off by default) Philter would buy the copy. tidy's floor counts those

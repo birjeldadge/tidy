@@ -198,7 +198,7 @@ Set these in the gCLI with `set name = value`.
 | Preference | Default | Meaning |
 |---|---|---|
 | `tidy_keepAbove` | 10000 | New item kinds worth this much or more per copy start as KEEP, whatever the count. `0` turns it off. |
-| `tidy_reprice` | down | `down`: never raises a price you set, and never chases a market that collapsed to the 100-meat floor. `both`: follows the market in either direction, with the same daily cap and a fresh search before any change. `off`: never reprices. |
+| `tidy_reprice` | down | `down`: never raises a price you set, and never chases a market that collapsed to KoL's floor (100 meat, or twice the autosell value). `both`: follows the market in either direction, with the same daily cap and a fresh search before any change. `off`: never reprices. |
 | `tidy_protectAbove` | 1000000 | Listings priced above this, or whose market price is above this, are never repriced (your hand-set prices). Set to `0` to turn the guard off and reprice everything. Listings parked at 999,999,999 or more are left alone either way. |
 | `tidy_maxCutPct` | 30 | The most the daily reprice may cut one listing in one day, as a percent of its current price. A few cheap units dumped by someone else for an afternoon cannot drag your listing to the floor in one run; if the market really stays there, the rest of the way comes on later days. |
 | `tidy_holdNewDays` | 1 | Any run that writes a new MALL or AUTO rule (a preview, the first run, the closet preview or a live run) holds everything on hand (bag, closet and worn copies, counted the way Philter counts, plus anything picked up during the hold) for this many days, so nothing ever sells on a rule the same run that wrote it. The hold is also released only after a preview has run to the end on a later day than the rule was written: the preview lists every held rule with what would sell, and that is the look. A chained `garbo; tidy go`, or `tidy; tidy go` on the same day, with nobody looking keeps the hold. A day here is a UTC calendar day (for US evening players a new day starts at 7 or 8 pm), read once at the start of each run, so a run that straddles midnight cannot count as its own later-day look. Only a live run releases a hold (a preview lists it and leaves the record), and it makes one fresh mall search first, checking the price the rule was decided on (recorded with the hold); the rule stays on hold, and says so, if the market has left the band the decision came from: an AUTO decision now worth more than twice the floor and more than your lazyman number, a MALL decision whose price has at least doubled and reached `tidy_keepAbove`, or nothing listed at all. Set the rule you want in Philter Manager to end such a hold; until then it is searched again on each later live run. The release keeps at least the worn plus closet copies, like every other run. Drip listings skip a held rule too. `0` turns the hold off. |
@@ -330,22 +330,7 @@ CLST only on the live run; worn gear of any kind is kept inside a sell rule's
 keep-count every run; a revert right after a first run is refused; the
 take-backs for outfit pieces and familiar gear are no longer satisfied by
 closet copies. Upgrading users need one fresh preview before their next
-`tidy go`. A ninth review, run to a stricter bar (catastrophic items and
-regressions only), found nothing catastrophic and one regression from the
-eighth's fixes: raising closet (CLST) keep-counts to the worn-gear floor was
-right every day but wrong on the day `tidycloset go` empties the closet, so
-the spares of worn gear stayed in the bag; the closet run now sets such a
-count to what is out of the closet for that run only. An eighth review found that a preview reported the worn-gear
-raise without writing it, so Philter's simulation stripped the worn copy
-into your bag and the next live run sold it; that a preview could release a
-hold on a cached price, so the fresh search never happened; that a card in
-the card sleeve (or a codpiece gem, or a holstered sixgun) tripped a
-"please report this" stop on every live run; that a second revert after a
-run which released every hold stranded the records; that closet (CLST) rules
-sat outside the floor; and that a notice suggested adopting a stale test
-file name. All fixed: previews write the floor before Philter runs and
-never release a hold, one worn test covers every slot mafia counts and CLST
-rules too, and the hold copy carries a marker line. A seventh review found that the release of a held rule put the
+`tidy go`. A seventh review found that the release of a held rule put the
 day-old keep-count back after the worn-gear raise, so on release day a cheap
 hat you were wearing, with its spares in the closet, could still be taken off
 you and sold; that the same raise on a held rule read as a hand edit and
@@ -359,7 +344,27 @@ keep-count check, the hold check, the release, the drip and the top-up;
 revert compares both files and never replaces hold records with nothing;
 previews use the cache throughout. The familiar fetch went with it: a sell
 rule on gear anyone is wearing is raised before the top-up, so there is
-nothing left for Philter or tidy to fetch.
+nothing left for Philter or tidy to fetch. An eighth review found that a
+preview reported the worn-gear raise without writing it, so Philter's
+simulation stripped the worn copy into your bag and the next live run sold
+it; that a preview could release a hold on a cached price, so the fresh
+search never happened; that a card in the card sleeve (or a codpiece gem, or
+a holstered sixgun) tripped a "please report this" stop on every live run;
+that a second revert after a run which released every hold stranded the
+records; that closet (CLST) rules sat outside the floor; and that a notice
+suggested adopting a stale test file name. All fixed: previews write the
+floor before Philter runs and never release a hold, one worn test covers
+every slot mafia counts and CLST rules too, and the hold copy carries a
+marker line. A ninth review, run to a stricter bar (catastrophic items and
+regressions only), found nothing catastrophic and one regression from the
+eighth's fixes: raising closet (CLST) keep-counts to the worn-gear floor was
+right every day but wrong on the day `tidycloset go` empties the closet, so
+the spares of worn gear stayed in the bag; the closet run now sets such a
+count to what is out of the closet for that run only. Since then the code
+has been reworked for readability after a clanmate's review (names spelled
+out, no long lines) with no change in behaviour, proven by running the old
+and new script side by side (see DESIGN.md, "What has been tested"); no
+upgrade step is needed for it.
 
 - Aftercore only (refuses in Ronin or Hardcore).
 - Refuses until Hagnk's has been emptied this ascension (`pull all`).
@@ -406,5 +411,6 @@ Design notes, including why each default is what it is: [DESIGN.md](DESIGN.md).
 
 Written by Birj (birjeldadge) with Claude, Anthropic's AI assistant, doing the
 coding under his direction: Birj set the rules and the ethics, two clanmates
-tested and pushed back, Claude wrote and tested the ASH. Built on Philter (LASS)
+tested and pushed back, a third reviewed the code, Claude wrote and tested the
+ASH. Built on Philter (LASS)
 and OCD Inventory Control (Bale), and Zarqon's zlib. MIT licensed.
