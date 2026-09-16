@@ -114,6 +114,7 @@ string PIN_FILE = "tidy_pin_" + DATA_NAME + ".txt";
 boolean IN_RESET = false;        // a reset's own preview must not count as "the user looked"
 boolean SNAPSHOT_TAKEN = false;  // .prev is written once per run, on the first write of the rule file
 boolean RULES_WRITTEN = false;   // whether this run wrote the rule file at all
+boolean CLOSET_RUN = false;      // inside tidycloset go: the keep-count check must not put the one-copy minimum back on CLST rules
 
 // Plain digits, at most 15 of them (fits a long). is_integer() also accepts a leading sign and commas ("-1", "1,000"),
 // and to_int() turns a number too big for a long into 0 with nothing but a log line, so this is the only test used
@@ -589,6 +590,10 @@ void enforce_keep_one(OCDinfo [item] rules, boolean sim, string tag) {
 	foreach it, rule in rules {
 		int minKeep = protect_min(it, pieces);
 		int need = keep_floor(it, pieces);   // the minimum, or the worn plus closet copies: gear on you or a familiar is never the extra
+		// In a closet run the closet is empty at this point, so the floor would be the one-copy minimum again and one copy of
+		// every unworn piece would stay out: the earlier lowering (worn copies or the keep-list count, no minimum) stands.
+		if (CLOSET_RUN && rule.action == "CLST")
+			need = max(equipped_amount(it, true), ((KEEP_LIST contains it) && KEEP_LIST[it] > 0) ? KEEP_LIST[it] : 0);
 		if (need == 0) continue;
 		// CLST too: Philter's fetch runs for every action but KEEP. Written in previews as well: Philter's simulation works from
 		// the file and strips a worn copy into the bag whenever the count sits under the floor, sim switch or not; a preview
@@ -1023,7 +1028,9 @@ void tidy_closet_run(boolean sim) {
 	print(tag + "emptying the closet into inventory... (if a later step stops this run, the closet stays in your inventory;"
 		+ " fix the cause and run tidy go)", "red");
 	if (!empty_closet()) abort(tag + "could not empty the closet. Nothing sold.");
+	CLOSET_RUN = true;
 	tidy_run(false);
+	CLOSET_RUN = false;
 	cli_execute("refresh closet");
 	print(tag + "done. Closet now holds " + count(get_closet()) + " kinds.", "blue");
 }

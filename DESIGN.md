@@ -525,7 +525,12 @@ needed for it.
   back. The author's first real closet run on the public script found the
   earlier version kept one copy of every protected item out, worn or not,
   because the daily floor sets every such rule to the trigger value; ten
-  pieces of unworn familiar gear stayed in the bag. Fixed the same day.
+  pieces of unworn familiar gear stayed in the bag. Fixed the same day, and
+  again four days later: the first fix lowered the count in the closet step,
+  but the keep-count check that runs right after the closet is emptied put
+  the one-copy minimum back (the closet being empty, the floor was the
+  minimum again), so one copy of each piece still stayed out. The check now
+  leaves a CLST rule at the worn copies or keep-list count during a closet run.
 - "N would sell" in a preview is the count at preview time; the live release
   sells the count at that moment, copies picked up in between included. The
   rule is what was looked at, not the number.
