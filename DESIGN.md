@@ -530,7 +530,10 @@ needed for it.
   but the keep-count check that runs right after the closet is emptied put
   the one-copy minimum back (the closet being empty, the floor was the
   minimum again), so one copy of each piece still stayed out. The check now
-  leaves a CLST rule at the worn copies or keep-list count during a closet run.
+  leaves a CLST rule at the worn copies or keep-list count during a closet run. A third
+  fix the same day: the closet step had counted bag copies as "out", so a
+  copy that had escaped the closet once stayed out on every later run; it
+  now counts worn copies and the keep-list only, as this entry always said.
 - "N would sell" in a preview is the count at preview time; the live release
   sells the count at that moment, copies picked up in between included. The
   rule is what was looked at, not the number.
