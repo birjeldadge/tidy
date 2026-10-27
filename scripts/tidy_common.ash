@@ -46,9 +46,9 @@
 //                       many days before it can sell (0 = off).
 //                       A held rule is released only after the wait AND after a preview has run to the end on a later day than
 //                       the rule was written (the preview lists every held rule and what would sell), so nothing sells on a
-//                       rule nobody looked at. Holds, top-ups and drip keep-counts count bag + closet + worn copies, as Philter does.
+//                       rule nobody looked at. Holds, top-ups and drip keep-counts count bag + closet + Hagnk's + worn copies, as Philter does.
 //                       Gear you or a familiar are wearing is never the extra: every run raises a sell rule's keep-count to the
-//                       worn plus closet copies (keep_floor), the release of a hold respects the same floor, and the top-up
+//                       worn plus put-away copies (keep_floor), the release of a hold respects the same floor, and the top-up
 //                       sends bag copies only. To sell a worn copy, unequip it first.
 //   tidy_priceFactor    multiply the market price by this when repricing (default 1.0 = match market;
 //                       0.99 = list 1% under the market price to get the sale first; never below 100 meat).
@@ -80,7 +80,7 @@ since r27250;
 import "zlib.ash";
 
 // One Philter rule, the columns of a line in OCDdata_<name>.txt. q is the keep-count, under Philter's own column name:
-// how many copies stay on hand (bag + closet + worn) before the action applies to the rest. info is a MALL rule's
+// how many copies stay on hand (bag + closet + Hagnk's + worn) before the action applies to the rest. info is a MALL rule's
 // minimum price or a GIFT rule's recipient; message is free text that Philter Manager blanks for MALL/AUTO rules on
 // every save. ASH's foreach hands out a reference to the record, so "rule.q = ..." inside a loop over the map changes
 // the rule in the map.
@@ -430,9 +430,15 @@ boolean is_tool_type(item it) {
 		|| kind.contains_text("zap");
 }
 // How many of a piece of gear you can wear at once: three accessory slots, one of anything else. Keep-counts built
-// on this add the closet copies: Philter satisfies a keep-count with closet copies first and sells from the bag, then
-// off your body, so a "keep 1" with one copy in the closet would sell the one you are wearing.
+// on this add the put-away copies: Philter satisfies a keep-count with them first and sells from the bag, then off
+// your body, so a "keep 1" with one copy in the closet would sell the one you are wearing.
 int gear_slots(item it) { return it.to_slot() == $slot[acc1] ? 3 : 1; }
+// Copies Philter counts toward a keep-count but never takes out to sell: the closet and Hagnk's storage. While Philter
+// runs it forces autoSatisfyWithCloset and autoSatisfyWithStorage off, and its count (fullAmount in philter.js) then adds
+// closetAmount and storageAmount to what you carry and wear. tidy refuses to run until Hagnk's has been emptied this
+// ascension, but copies can still sit there (whatever "pull all" could not pull, anything that lands there later), and
+// each one left out of tidy's count is one bag copy Philter sells past a hold, or one worn copy it strips.
+int put_away(item it) { return closet_amount(it) + storage_amount(it); }
 
 // Always keep one of every piece of a saved custom outfit (three for accessories) and one of
 // every familiar equipment item. Extras may sell; the last copy never does.
@@ -471,16 +477,16 @@ int [item] KEEP_LIST = load_keep_list();
 // outfit pieces and familiar equipment keep as many as you can wear (3 for accessories, else 1), everything else 0.
 int protect_min(item it, boolean [item] pieces) {
 	if ((KEEP_LIST contains it) && KEEP_LIST[it] > 0) return KEEP_LIST[it];
-	if (is_protected_gear(it, pieces)) return gear_slots(it) + closet_amount(it);
+	if (is_protected_gear(it, pieces)) return gear_slots(it) + put_away(it);
 	return 0;
 }
-// What Philter measures a keep-count against: bag + closet + worn, where "worn" includes equipment on every familiar in
-// the terrarium, not just the active one (mafia's accessible count adds getEquippedCount(item, true)). Items installed
-// in the campground also count for Philter and are not counted here; nothing tidy writes rules for lives there.
-int on_hand(item it) { return item_amount(it) + closet_amount(it) + equipped_amount(it, true); }
+// What Philter measures a keep-count against: bag + closet + Hagnk's + worn, where "worn" includes equipment on every
+// familiar in the terrarium, not just the active one (mafia's accessible count adds getEquippedCount(item, true)). Items
+// installed in the campground also count for Philter and are not counted here; nothing tidy writes rules for lives there.
+int on_hand(item it) { return item_amount(it) + put_away(it) + equipped_amount(it, true); }
 // The floor a MALL/AUTO keep-count may not go under, re-derived every time it is asked for: the keep-list, outfit or
-// familiar-equipment minimum, or the copies worn by you or any familiar plus the closet copies, whichever is higher.
-// Philter satisfies a keep-count with closet copies first, sells from the bag, then strips worn copies (in simulation
+// familiar-equipment minimum, or the copies worn by you or any familiar plus the put-away (closet and Hagnk's) copies,
+// whichever is higher. Philter satisfies a keep-count with put-away copies first, sells from the bag, then strips worn copies (in simulation
 // too), so a rule under this floor sells the copy on your body. ONE formula, used by the keep-count patch, the hold
 // check, the release, the drip and the top-up: three separate ones once disagreed, and the release day stripped gear.
 int keep_floor(item it, boolean [item] pieces) {
@@ -488,7 +494,7 @@ int keep_floor(item it, boolean [item] pieces) {
 	// everything mafia counts as equipped, on you or any familiar: cards in the sleeve, codpiece gems and holstered
 	// sixguns have no slot of their own but are counted (and Philter sees them too)
 	int worn = equipped_amount(it, true);
-	return max(minKeep, (worn > 0) ? worn + closet_amount(it) : 0);
+	return max(minKeep, (worn > 0) ? worn + put_away(it) : 0);
 }
 
 string rule_line(item it, string action, int q, string info, string message) {
@@ -589,7 +595,7 @@ void enforce_keep_one(OCDinfo [item] rules, boolean sim, string tag) {
 	int patched = 0;
 	foreach it, rule in rules {
 		int minKeep = protect_min(it, pieces);
-		int need = keep_floor(it, pieces);   // the minimum, or the worn plus closet copies: gear on you or a familiar is never the extra
+		int need = keep_floor(it, pieces);   // the minimum, or the worn plus put-away copies: gear on you or a familiar is never the extra
 		// In a closet run the closet is empty at this point, so the floor would be the one-copy minimum again and one copy of
 		// every unworn piece would stay out: the earlier lowering (worn copies or the keep-list count, no minimum) stands.
 		if (CLOSET_RUN && rule.action == "CLST")
@@ -653,9 +659,9 @@ Decision decide_verdict(item it, int have, OCDinfo [item] bale, int [item] shop,
 	if (!sell_consumables() && is_consumable(it)) return keep("consumable: yours to decide (tidy_sellConsumables = true to sell these)");
 	boolean gear = (it.to_slot() != $slot[none]);
 	if (gear || is_tool_type(it)) {
-		// closet copies sit inside the keep, so the copy you wear is never the extra; nor is a second worn copy (two of one
+		// put-away copies sit inside the keep, so the copy you wear is never the extra; nor is a second worn copy (two of one
 		// weapon dual-wielded, a hat-trick hat): the worn count wins over the slot count when it is higher
-		int slots = max(gear_slots(it), equipped_amount(it, true)) + closet_amount(it);
+		int slots = max(gear_slots(it), equipped_amount(it, true)) + put_away(it);
 		int cheap = (keepAbove > 0) ? keepAbove : 10000;   // "cheap" is the same line tidy_keepAbove draws for everything else
 		if (have > slots && price > 0 && price < cheap) {
 			if (price <= 100 && autosell_price(it) >= 1) return sell("AUTO", slots, "duplicate cheap gear, keep " + slots);
@@ -867,7 +873,7 @@ void drip_step(OCDinfo [item] rules, int [item] shop, boolean sim, string tag) {
 				}
 			}
 		}
-		// whatever is still on hand stays on hand: Philter must not list it (it counts bag + closet + worn, so keep that many);
+		// whatever is still on hand stays on hand: Philter must not list it (it counts bag + closet + Hagnk's + worn, so keep that many);
 		// never under the keep-count floor either, or this and the keep-count check would rewrite the file twice every run
 		if ((rules contains it) && rules[it].action != "KEEP") {
 			int want = max(on_hand(it), keep_floor(it, pieces));
@@ -1054,7 +1060,7 @@ void tidy_closet_run(boolean sim) {
 		kinds += 1; total += have;
 		if (!(rules contains it)) { missing += 1; if (missing <= 15) print("  no rule: " + have + " " + it, "red"); continue; }
 		string action = rules[it].action;
-		int sellable = max(0, have + item_amount(it) + equipped_amount(it, true) - rules[it].q);
+		int sellable = max(0, have + item_amount(it) + storage_amount(it) + equipped_amount(it, true) - rules[it].q);
 		kindsBy[action] += 1; itemsBy[action] += have;
 		if (action == "MALL") mallVal += min(sellable, have) * (historical_price(it) > 0 ? historical_price(it) : 0);
 		if (action == "AUTO") autoVal += min(sellable, have) * autosell_price(it);
@@ -1422,7 +1428,7 @@ void tidy_run(boolean sim) {
 	int added = 0; int addMall = 0; int addAuto = 0; int addKeep = 0; int held = 0;
 	foreach it, have in inv {
 		if (rules contains it) continue;
-		Decision verdict = decide(it, on_hand(it), bale, shop, pieces);   // counted the way Philter counts (bag + closet + worn)
+		Decision verdict = decide(it, on_hand(it), bale, shop, pieces);   // counted the way Philter counts (bag + closet + Hagnk's + worn)
 		added += 1;
 		if (verdict.action == "MALL") addMall += 1; else if (verdict.action == "AUTO") addAuto += 1; else addKeep += 1;
 		OCDinfo rule; rule.action = verdict.action; rule.q = verdict.q; rule.info = ""; rule.message = "";
@@ -1430,7 +1436,7 @@ void tidy_run(boolean sim) {
 		if (holdDays > 0 && verdict.action != "KEEP") {
 			// whichever run writes the rule (a preview as much as a live run), it may not sell on it: hold everything on hand
 			// until the wait is over and a later-day preview has listed it. Philter measures the keep-count against bag +
-			// closet + worn copies, so the hold counts the same way.
+			// closet + Hagnk's + worn copies, so the hold counts the same way.
 			hold_new_rule(it, rule, verdict.q); held += 1; isHeld = true;
 		}
 		string heldTag = isHeld ? "   [held " + plural(holdDays, "day", "days") + "]" : "";
@@ -1466,12 +1472,13 @@ void tidy_run(boolean sim) {
 	foreach it, listed in shop {
 		if (DRIP_LIST contains it) continue;
 		if (!(rules contains it) || rules[it].action != "MALL") continue;
-		// Philter's excess is (bag + closet + worn) - keep-count. It takes that from the bag and fetches the rest itself, off
-		// any familiar wearing the item and off YOU (never out of the closet: Philter forces autoSatisfyWithCloset off while it
-		// runs, so closet copies count but stay put), and lists whatever it fetched at market, which KoL applies to the whole
-		// listing (your price is gone). The keep-count check above has already written every sell rule's keep-count at or
-		// above the floor (worn + closet copies), in previews too, so the excess is bag copies only and nothing is worn
-		// beyond the keep. The stop below is therefore unreachable today (keep_floor and the test count "worn" the same way);
+		// Philter's excess is (bag + closet + Hagnk's + worn) - keep-count. It takes that from the bag and fetches the rest itself, off
+		// any familiar wearing the item and off YOU (never out of the closet or Hagnk's: Philter forces autoSatisfyWithCloset
+		// and autoSatisfyWithStorage off while it runs, so those copies count but stay put), and lists whatever it fetched at
+		// market, which KoL applies to the whole listing (your price is gone). The keep-count check above has already written
+		// every sell rule's keep-count at or above the floor (worn + put-away copies), in previews too, so the excess is bag
+		// copies only and nothing is worn beyond the keep. The stop below is therefore unreachable today (keep_floor and the
+		// test count "worn" the same way);
 		// it stays as a guard for the next edit that makes them disagree, rather than let Philter strip.
 		int keepQ = max(rules[it].q, keep_floor(it, pieces));
 		int wanted = on_hand(it) - keepQ;
@@ -1487,7 +1494,7 @@ void tidy_run(boolean sim) {
 			if (sim) print(why, "red"); else abort(why);
 			continue;
 		}
-		int excess = min(wanted, item_amount(it));   // closet copies count but stay where they are
+		int excess = min(wanted, item_amount(it));   // closet and Hagnk's copies count but stay where they are
 		if (excess <= 0) continue;
 		topped += 1; toppedItems += excess;
 		if (sim) print("  would add " + excess + " " + it + " to your store at your price of " + rnum(price), "black");
