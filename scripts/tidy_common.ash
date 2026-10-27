@@ -987,10 +987,13 @@ int closet_bootstrap(OCDinfo [item] rules, int [item] closet, string tag, boolea
 				print("  " + it + ": KEEP -> CLST keep " + keepOut + " (closet copies go back to the closet)"
 					+ (apply ? "" : " [applied on the live run]"), "black");
 			}
-			else if (rules[it].action == "CLST" && rules[it].q == keep_floor(it, pieces)) {
-				// A CLST rule on protected gear (outfit piece, familiar equipment, keep-list item) sits at tidy's floor, which
-				// counts the closet copies. That is right every day but wrong on the one day the closet is emptied: the closet
-				// copies would then be inside the keep and stay in the bag for good. For this run only, the keep-count is the copies
+			else if (rules[it].action == "CLST" && keep_floor(it, pieces) > 0 && rules[it].q >= keep_floor(it, pieces)) {
+				// A CLST rule on protected gear (outfit piece, familiar equipment, keep-list item, or anything worn) sits at or
+				// above tidy's floor, which counts the closet copies. At or above, not only on it: a count raised past the floor
+				// by hand kept those copies out of the closet after the run just the same (the 2026-10-27 audit). A floor of 0
+				// (ordinary items, nothing worn) is left out, so a hand-set "keep N out of the closet" on them stays as set. That
+				// count is right every day but wrong on the one day the closet is emptied: the closet copies would then be inside
+				// the keep and stay in the bag for good. For this run only, the keep-count is the copies
 				// you or a familiar wear, or the keep-list count if higher; a bag copy is a spare and goes back too. There is
 				// no one-copy minimum here: a CLST rule never sells, so keeping none in the bag is safe, and the next day's run
 				// raises the count to the floor again once the copies are closeted. (The first version kept one copy of every

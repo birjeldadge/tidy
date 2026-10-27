@@ -557,6 +557,11 @@ needed for it.
   fix the same day: the closet step had counted bag copies as "out", so a
   copy that had escaped the closet once stayed out on every later run; it
   now counts worn copies and the keep-list only, as this entry always said.
+  The 2026-10-27 audit found one more gap: the closet step only lowered a
+  count sitting exactly on the floor, so one raised above it by hand kept
+  those copies in the bag after the run. It now lowers any count at or above
+  a floor that is more than zero; ordinary items, whose floor is zero, keep a
+  hand-set count as it is.
 - "N would sell" in a preview is the count at preview time; the live release
   sells the count at that moment, copies picked up in between included. The
   rule is what was looked at, not the number.
