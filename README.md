@@ -272,6 +272,12 @@ one fresh preview before the next `tidy go`. Any install updated after
 - Aftercore only (refuses in Ronin or Hardcore).
 - Refuses until Hagnk's has been emptied this ascension (`pull all`).
 - Forces Philter's `BaleOCD_EmptyCloset` to -1 so Philter never dumps your closet on its own.
+- Refuses a live run while one of Philter's own settings would send, buy or blanket-sell: `BaleOCD_MallMulti`
+  set to an account name (with `BaleOCD_UseMallMulti` on, Philter's default), which kmails every MALL item to
+  that account instead of listing it; `BaleOCD_Stock` = 1, which buys stock with your meat; or
+  `BaleOCD_MallDangerously` on, which malls any item that has no rule. tidy names the setting and the one-line
+  fix and changes nothing; they are your settings, so it does not change them for you. A preview prints the same
+  warning and carries on, because Philter's simulation does none of those things.
 - The first time a run writes your rule file or the hold records it copies both as they were to `OCDdata_<name>.prev.txt` and `tidy_hold_<name>.prev.txt`, after the rule file has been read and checked; a run that writes neither leaves the copies alone, so `tidy revert` always undoes the last run that changed something. If a copy cannot be written, the run stops before changing anything; if the rule file cannot be written after the records were, the records go back to their copy.
 - A rule file that exists but does not parse is never overwritten; tidy stops and tells you. So does a file with lines a rewrite would drop (no tab in the line, an item this KoLmafia does not know, the same item twice) or quietly change (a keep-count that is not a plain number: `x` would become 0 and `5k` would become 5000; an empty action; a MALL minimum price that is not a number): tidy names the first such line and changes nothing.
 - Live runs are refused while `tidy_rulesSuffix` is set. Philter is pointed at tidy's rule file only for the moment it runs and back at exactly whatever it was straight after, so neither Philter nor its Manager is left looking at a test file. If a run that stopped early left Philter on a test name, the next run says so and tells you the one-line fix.
@@ -302,7 +308,10 @@ you wrote yourself says so. Those actions can create item kinds mid-run, and
 Philter then stops and asks about a kind that has no rule; tidy cannot
 pre-empt that.
 
-That promise covers old rules too. Philter's CLAN action puts items in the clan
+That promise covers old Philter settings too: a mall multi, stock buying or "mall dangerously" left over
+from an old setup stops `tidy go` until you change it (see Guards).
+
+It covers old rules as well. Philter's CLAN action puts items in the clan
 stash, GIFT kmails them to another player, and DISC discards them. If your rule
 file has any (an old setup often does), tidy turns them into KEEP on every run
 and tells you which ones. To let them fire, `set tidy_allowGiving = true`, then `tidy revert` to
