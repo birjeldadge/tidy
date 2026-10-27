@@ -204,7 +204,10 @@ never releases a hold, so repeated previews do not hammer the mall; the live
 run searches fresh, the release check included. The reprice day
 lives in `data/tidy_state_<name>.txt`, written before the first change: a
 preference would be per mafia install, and two installs on one synced data
-folder (a real layout) would each cut once. `tidy_priceFactor` under
+folder (a real layout) would each cut once. A preview reads the same record:
+once the day's live reprice has run, it says so and skips the step instead of
+listing cuts the next live run would not make (on 2026-10-26 an evening preview
+listed 40 such cuts; the 2026-10-27 audit caught it). `tidy_priceFactor` under
 1.0 lists under market for people who want the sale first, but only for a
 listing that sits above market: the market figure counts your own units, so
 when you are the cheapest seller it is your own price, and the second review

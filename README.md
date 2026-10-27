@@ -29,7 +29,9 @@ and fixes the three things that make Philter annoying to run every day:
    never goes below that floor or below the minimum price on the rule, and
    never moves a listing more than 30% in a day (all adjustable, see Settings).
    Listings above the threshold, or parked at 999,999,999 meat or more, are
-   your hand-set prices and are never touched.
+   your hand-set prices and are never touched. Once today's live run has
+   repriced, a later preview the same day says so instead of listing cuts the
+   next live run would skip.
 
 Everything is whitelist-only: an item with no rule is never touched, and every
 live command has a preview twin that sells nothing.
