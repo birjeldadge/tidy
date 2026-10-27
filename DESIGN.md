@@ -31,7 +31,8 @@ each new item rather than a blanket answer.
 
 1. Guards: aftercore only, Hagnk's emptied, Philter's closet-dump setting forced
    off, live runs refused under the test suffix, a price factor outside 0.5 to
-   1.0 refused.
+   1.0 refused, and live runs refused while Philter is set to kmail MALL items to
+   a mall multi, buy stock, or mall items that have no rule (a preview warns).
 2. First run only: a rule for every inventory item kind, the MALL and AUTO ones
    on hold, nothing sold.
 3. If the rule file predates tidy: a one-time notice with counts, including any
@@ -127,7 +128,16 @@ adversarial review; nobody was hit.
 
 **Nothing leaves the account except through the mall and autosell.** tidy makes
 no network calls of its own, uses no kmail, trade or stash functions, and turns
-inherited CLAN, GIFT and DISC rules into KEEP by default. Philter can still pulverize,
+inherited CLAN, GIFT and DISC rules into KEEP by default. Three of Philter's own
+settings would break the promise from outside the rule file: `BaleOCD_MallMulti`
+(with `BaleOCD_UseMallMulti`, which Philter defaults to true) kmails every MALL item
+to another account, `BaleOCD_Stock = 1` buys stock with meat, and
+`BaleOCD_MallDangerously` malls any item without a rule. tidy did not look at them
+until an audit on 2026-10-27 found the gap (nobody was hit: the author's account had
+none of them set). A live run now names any that are on and stops before changing
+anything; a preview warns and carries on, since Philter's simulation sends, buys and
+sells nothing. tidy does not change them itself: they are the owner's settings,
+and changing them silently could hide an alt setup someone relies on. Philter can still pulverize,
 use, craft, untinker or display items if a rule the owner wrote says so; tidy
 itself only ever writes KEEP, MALL, AUTO and CLST.
 

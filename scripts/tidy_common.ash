@@ -878,6 +878,33 @@ void set_philter_var(string name, string value, string tag) {
 		abort(tag + "could not set Philter's " + name + " to " + value + ". Stopping before anything is sold.");
 }
 
+// Three of Philter's own settings break "nothing leaves your account except through the mall and autosell", and an old
+// Philter or OCD setup may still carry them. BaleOCD_MallMulti (with BaleOCD_UseMallMulti, which Philter defaults to
+// true) kmails every MALL item to that account instead of listing it; BaleOCD_Stock = 1 buys stock with meat after the
+// cleanup; BaleOCD_MallDangerously malls any item that has no rule, such as one a MAKE or USE rule creates mid-run. They
+// are the owner's choices, so tidy names them and stops instead of changing them. A preview only warns: Philter's
+// simulation sends, buys and sells nothing, and the warning is part of the look. Read from the map, as for
+// BaleOCD_EmptyCloset: a name missing from it means Philter's default.
+void philter_sending_guard(boolean sim, string tag) {
+	string [int] found;
+	string multi = (vars contains "BaleOCD_MallMulti") ? vars["BaleOCD_MallMulti"] : "";
+	boolean useMulti = !(vars contains "BaleOCD_UseMallMulti") || vars["BaleOCD_UseMallMulti"].to_boolean();
+	if (multi != "" && to_lower_case(multi) != "false" && useMulti)
+		found[count(found)] = "BaleOCD_MallMulti is '" + multi + "', so Philter would kmail every MALL item to that account instead"
+			+ " of listing it (fix: zlib BaleOCD_UseMallMulti = false)";
+	if ((vars contains "BaleOCD_Stock") && vars["BaleOCD_Stock"] == "1")
+		found[count(found)] = "BaleOCD_Stock is 1, so Philter would buy stock with your meat after the cleanup (fix: zlib BaleOCD_Stock = 0)";
+	if ((vars contains "BaleOCD_MallDangerously") && vars["BaleOCD_MallDangerously"].to_boolean())
+		found[count(found)] = "BaleOCD_MallDangerously is on, so Philter would mall any item that has no rule"
+			+ " (fix: zlib BaleOCD_MallDangerously = false)";
+	if (count(found) == 0) return;
+	foreach i, line in found print(tag + "Philter setting: " + line + ".", "red");
+	string why = "tidy never kmails, buys, or sells an item nobody has a rule for.";
+	if (sim) print(tag + why + " This preview runs Philter in simulation, which does none of that, but tidy go will refuse"
+		+ " until the setting" + (count(found) == 1 ? " above is" : "s above are") + " changed.", "red");
+	else abort(tag + why + " Change the setting" + (count(found) == 1 ? " above" : "s above") + " and run again. Nothing was done.");
+}
+
 void common_guards(boolean sim, string tag) {
 	if (!sim && get_property("tidy_rulesSuffix") != "") abort(tag + "tidy_rulesSuffix is set to '" + get_property("tidy_rulesSuffix")
 		+ "', which points at a test rule file. Live runs are refused while it is set. Clear it with: set tidy_rulesSuffix =");
@@ -893,6 +920,7 @@ void common_guards(boolean sim, string tag) {
 	if (!can_interact()) abort(tag + "you are in Ronin or Hardcore. This is an aftercore tool.");
 	if (get_property("lastEmptiedStorage").to_int() != my_ascensions())
 		abort(tag + "Hagnk's has not been emptied this ascension. Run 'pull all' first.");
+	philter_sending_guard(sim, tag);   // before the closet setting below, so a refused run changes nothing
 	// read the map, not getvar(): a missing name prints a purple line
 	string emptyCloset = (vars contains "BaleOCD_EmptyCloset") ? vars["BaleOCD_EmptyCloset"] : "";
 	if (emptyCloset != "-1") {
