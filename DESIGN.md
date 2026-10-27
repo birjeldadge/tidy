@@ -54,8 +54,8 @@ each new item rather than a blanket answer.
 8. Daily reprice of the store (see pricing).
 9. Drip listings (see below).
 10. Top-ups: for MALL rules on items already in the store, the bag copies above
-   the keep-count, counted the way Philter counts (bag + closet + worn,
-   terrarium included), go in at your existing price, so Philter finds nothing
+   the keep-count, counted the way Philter counts (bag + closet + Hagnk's +
+   worn, terrarium included), go in at your existing price, so Philter finds nothing
    to move for those items. Closet copies count but stay (Philter forces its
    closet setting off while it runs); worn copies sit inside the keep-count
    after step 5, so there is nothing to fetch off you or a familiar, and if a
@@ -103,7 +103,7 @@ the keep-count floor of the day (worn plus closet copies), which the seventh
 review found it did not. So a spoofed or
 transient market price can never turn a new item into a sale before a human
 saw the rule. Added after the adversarial review. The hold counts what
-Philter counts, bag + closet + worn (on you or on any familiar in the
+Philter counts, bag + closet + Hagnk's + worn (on you or on any familiar in the
 terrarium), and grows to cover copies picked up while
 it lasts; the second review found the first version counted only the bag, so
 Philter could still sell the bag copies when more sat in the closet. The hold
@@ -220,7 +220,7 @@ they price against you; a small lot that sells out and stays empty for a while
 looks like you dried up. `data/tidy_drip_<name>.txt` names items, a lot size,
 and an optional number of days to stay empty. tidy lists the lot only when the
 store holds none and the days have passed, never tops it up while any are
-listed, and sets the rule's keep-count to what is on hand (bag + closet + worn)
+listed, and sets the rule's keep-count to what is on hand (bag + closet + Hagnk's + worn)
 so Philter never lists the rest. A rule that is still on hold is skipped.
 
 ## Clean sweep and undo
@@ -570,7 +570,14 @@ needed for it.
   check is searched again on each later live run, and a first run costs up to
   one search per item kind; a big first-run release is a slow run.
 - Philter also counts items installed in your campground; tidy does not.
-  Nothing tidy writes rules for lives there in practice.
+  Nothing tidy writes rules for lives there in practice. Hagnk's storage used to
+  be in the same position: Philter counts it (its `fullAmount` adds storage while
+  it forces `autoSatisfyWithStorage` off), and tidy's count left it out, so a copy
+  in Hagnk's let Philter sell one bag copy past a hold, top up short and re-list
+  the rest at market, or strip a worn copy to make up the count. tidy refuses to
+  run until Hagnk's has been emptied, which made this rare but not impossible
+  (whatever `pull all` cannot pull stays there). The 2026-10-27 audit found it;
+  Hagnk's copies now count everywhere closet copies do.
 - Restoratives come from a snapshot of mafia's `restores.txt`; new restoratives
   need a line added.
 - The 5th-cheapest price is the only market signal a script can see.
