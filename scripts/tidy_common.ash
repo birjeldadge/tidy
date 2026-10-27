@@ -629,8 +629,8 @@ void enforce_keep_one(OCDinfo [item] rules, boolean sim, string tag) {
 Decision keep(string why) { Decision verdict; verdict.action = "KEEP"; verdict.q = 0; verdict.why = why; return verdict; }
 Decision sell(string action, int q, string why) { Decision verdict; verdict.action = action; verdict.q = q; verdict.why = why; return verdict; }
 
-// Decide a rule for an item that has none yet. have = how many you have.
-Decision decide(item it, int have, OCDinfo [item] bale, int [item] shop, boolean [item] pieces) {
+// The generator's own verdict for an item that has none yet; decide() below is what callers use. have = how many you have.
+Decision decide_verdict(item it, int have, OCDinfo [item] bale, int [item] shop, boolean [item] pieces) {
 	if (!is_tradeable(it)) return keep("untradeable");
 	int price = sale_price(it);
 	int keepAbove = keep_above();
@@ -671,6 +671,21 @@ Decision decide(item it, int have, OCDinfo [item] bale, int [item] shop, boolean
 		return keep("floor price, no autosell value");
 	}
 	return sell("MALL", 0, "mall " + rnum(price));
+}
+// Decide a rule for an item that has none yet: the verdict above, with a MALL or AUTO keep-count never under keep_floor.
+// The keep-count check runs before new rules are written, and a hold only covers this for as long as it lasts, so with
+// tidy_holdNewDays = 0 a keep-list count, or the lazyman rule's AUTO keep 0, went straight to Philter under the worn
+// plus closet copies, and Philter took the worn copy off to sell it. Every run that writes a rule (first run, closet
+// preview, new kinds) comes through here.
+Decision decide(item it, int have, OCDinfo [item] bale, int [item] shop, boolean [item] pieces) {
+	Decision verdict = decide_verdict(it, have, bale, shop, pieces);
+	if (verdict.action != "MALL" && verdict.action != "AUTO") return verdict;
+	int floorQ = keep_floor(it, pieces);
+	if (verdict.q < floorQ) {
+		verdict.why += "; keep raised to " + floorQ + ", the copies worn by you or a familiar plus your closet copies";
+		verdict.q = floorQ;
+	}
+	return verdict;
 }
 
 // First run: no rule file yet. Write a rule for every inventory kind, sell nothing.

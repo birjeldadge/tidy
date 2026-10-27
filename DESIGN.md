@@ -168,6 +168,14 @@ For an item with no rule, in this order:
 | Mall price at the 100 floor | AUTO if it has an autosell value, else KEEP | The market is flooded; autosell is the only meat left in it |
 | Everything else | MALL | The junk pile |
 
+Every MALL or AUTO verdict then passes through one more step: its keep-count is raised to the
+day's floor (the copies worn by you or any familiar plus the closet copies) if it sits under it.
+The keep-count check that enforces that floor runs before new rules are written, and the hold
+covers only while it lasts, so with `tidy_holdNewDays = 0` a keep-list count under the worn plus
+closet copies, or the lazyman rule's AUTO keep 0 on worn gear, reached Philter on the same run
+and Philter stripped the worn copy to sell it. The 2026-10-27 audit found this. The step lives in
+`decide()` itself, so the first run, the closet preview and new kinds in a daily run all get it.
+
 ## Pricing
 
 KoLmafia deliberately hides the true cheapest listing from scripts: its mall

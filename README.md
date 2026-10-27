@@ -113,6 +113,11 @@ For an item with no rule yet, in this order:
 - Mall price at the 100-meat floor: **AUTO** (autosell) if it has an autosell value, else KEEP.
 - Everything else: **MALL**.
 
+Whichever line decides it, a new MALL or AUTO rule is never written with a keep-count under the copies you or a
+familiar are wearing plus your closet copies; the reason column then says the keep was raised. With the default
+one-day hold this changes nothing you would see (the release keeps that floor anyway), but with `tidy_holdNewDays = 0`
+a keep-list count or the lazyman rule could otherwise have sent a worn copy to Philter on the run that wrote the rule.
+
 The closet preview uses the same logic for closet items. Anything it would
 KEEP is written as KEEP for now and becomes **CLST** only when `tidycloset go`
 runs (put back in the closet, keeping what is out of the closet at that
@@ -137,7 +142,8 @@ Your edits in Philter Manager stick. Every run, tidy only:
   you or a familiar are wearing, to cover the worn plus closet copies, so
   Philter never strips worn gear on tidy's watch. One floor, applied by
   every run (previews included, since Philter's simulation strips too), to
-  MALL, AUTO and CLST rules, when a held rule is released, and to the top-up.
+  MALL, AUTO and CLST rules, to every new MALL or AUTO rule as it is written,
+  when a held rule is released, and to the top-up.
   A hand-set count below the floor is raised back and the run says so; to
   sell a worn copy, unequip it first;
 - **turns CLAN, GIFT and DISC rules into KEEP** while `tidy_allowGiving` is
