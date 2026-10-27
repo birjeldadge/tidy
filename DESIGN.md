@@ -56,7 +56,9 @@ each new item rather than a blanket answer.
 10. Top-ups: for MALL rules on items already in the store, the bag copies above
    the keep-count, counted the way Philter counts (bag + closet + Hagnk's +
    worn, terrarium included), go in at your existing price, so Philter finds nothing
-   to move for those items. Closet copies count but stay (Philter forces its
+   to move for those items. "Existing" means after step 8: a preview, which
+   changes no price, shows the price its own reprice step would set, with
+   today's beside it (before the 2026-10-27 audit it showed today's alone). Closet copies count but stay (Philter forces its
    closet setting off while it runs); worn copies sit inside the keep-count
    after step 5, so there is nothing to fetch off you or a familiar, and if a
    rule somehow still sat below its floor the run would stop here.
