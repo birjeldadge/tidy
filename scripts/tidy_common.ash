@@ -745,8 +745,10 @@ int rule_min_price(OCDinfo [item] rules, item it) {
 // two mafia installs that share one data folder (a preference would be per install).
 void reprice_store(OCDinfo [item] rules, boolean sim, string tag) {
 	string [string] state = load_state();
-	if (!sim && (state contains "repriceDay") && state["repriceDay"] == RUN_DAY.to_string()) {
-		print(tag + "store already repriced today; skipping that step.", "blue");
+	// A preview skips too once today's live reprice has run: listing cuts the live run will not make (it skips this step)
+	// only misled whoever read the preview. The first preview of the day, before any live run, still lists them all.
+	if ((state contains "repriceDay") && state["repriceDay"] == RUN_DAY.to_string()) {
+		print(tag + "store already repriced today; " + (sim ? "a live run skips this step too." : "skipping that step."), "blue");
 		return;
 	}
 	string mode = reprice_mode();
