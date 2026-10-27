@@ -14,7 +14,8 @@ and fixes the three things that make Philter annoying to run every day:
    listing up at *your* price before Philter runs, so your prices stay yours.
    The top-up counts the way Philter counts (bag, closet, Hagnk's, and copies
    worn by you or by any familiar in your terrarium), at your price as it stands after
-   today's reprice, and sends bag copies only. Gear you or a familiar are
+   today's reprice (a preview shows that price too, with today's price beside
+   it), and sends bag copies only. Gear you or a familiar are
    wearing is never the extra: every run raises the keep-count on any sell rule
    for such gear to cover the worn plus closet copies (previews write it too,
    because Philter's simulation strips as readily as the live run), so Philter

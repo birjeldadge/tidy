@@ -740,6 +740,9 @@ int rule_min_price(OCDinfo [item] rules, item it) {
 	return plain_digits(rules[it].info) ? rules[it].info.to_int() : 0;
 }
 
+// The price a preview's reprice would set, per listing. A preview changes no price, so shop_price() still reads the old
+// one when the top-up line is printed further down, while the live run tops up after its reprice, at the new price.
+int [item] PREVIEW_PRICE;
 // Reprice every store listing to the current market price, once a day. The day is recorded in the state file next to
 // the rule file BEFORE the first change, so a run that stops halfway cannot cut the same listing twice, and neither can
 // two mafia installs that share one data folder (a preference would be per install).
@@ -797,7 +800,10 @@ void reprice_store(OCDinfo [item] rules, boolean sim, string tag) {
 		if (newPrice > ceilToday) { newPrice = ceilToday; capped += 1; }
 		if (newPrice == cur || (mode == "down" && newPrice > cur)) { same += 1; continue; }
 		changed += 1;
-		if (sim) print("  would reprice " + listed + " " + it + ": " + rnum(cur) + " -> " + rnum(newPrice), "black");
+		if (sim) {
+			print("  would reprice " + listed + " " + it + ": " + rnum(cur) + " -> " + rnum(newPrice), "black");
+			PREVIEW_PRICE[it] = newPrice;
+		}
 		else if (reprice_shop(newPrice, shop_limit(it), it))
 			print("  repriced " + listed + " " + it + ": " + rnum(cur) + " -> " + rnum(newPrice), "black");
 		else { failed += 1; print(tag + "could not reprice " + it + "; left at " + rnum(cur) + ".", "red"); }
@@ -1499,7 +1505,12 @@ void tidy_run(boolean sim) {
 		int excess = min(wanted, item_amount(it));   // closet and Hagnk's copies count but stay where they are
 		if (excess <= 0) continue;
 		topped += 1; toppedItems += excess;
-		if (sim) print("  would add " + excess + " " + it + " to your store at your price of " + rnum(price), "black");
+		if (sim) {
+			// the price the live run would use: today's reprice comes first there
+			string shown = (PREVIEW_PRICE contains it)
+				? rnum(PREVIEW_PRICE[it]) + " (after today's reprice; " + rnum(price) + " now)" : rnum(price);
+			print("  would add " + excess + " " + it + " to your store at your price of " + shown, "black");
+		}
 		else {
 			if (!put_shop(price, shop_limit(it), excess, it))
 				abort(tag + "could not add " + it + " to your store. Stopping before Philter so the listing cannot be repriced.");
