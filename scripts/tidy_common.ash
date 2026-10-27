@@ -2,7 +2,7 @@
 //
 //   tidy            PREVIEW: writes rules for new item kinds (MALL/AUTO ones on hold), raises held, drip and worn-gear
 //                   keep-counts, prints what a live run would do, sells nothing and releases no hold
-//   tidy go         LIVE: rules for new item kinds, store top-ups at your prices, daily reprice, then Philter
+//   tidy go         LIVE: rules for new item kinds, daily reprice, drip lots, store top-ups at your prices, then Philter
 //   tidy reset      clean sweep: backs up the rule file, then the first-run preview writes fresh rules (sells nothing)
 //   tidy revert     undo the last change tidy made to the rule file (swap with the .prev copy; run again to swap back;
 //                   refuses a copy that holds no readable rules)
@@ -28,9 +28,11 @@
 //      Listings above the threshold, or parked at 999,999,999+, are your
 //      hand-set prices and are left alone. No price duels.
 //
-// Rule logic for new kinds (decide): untradeable, gear, tools, display-case items
-// and rare singles stay; floor-priced junk is autosold; everything else goes to
-// the mall. Review the generated rules in Philter Manager any time.
+// Rule logic for new kinds (decide): untradeables, store and display-case items, Philter's default KEEPs, restoratives,
+// consumables (unless tidy_sellConsumables), gear and tools, and anything worth tidy_keepAbove or more per copy stay;
+// outfit pieces, familiar gear, keep-list items and cheap duplicate gear keep what you can wear and sell the extras;
+// floor-priced junk is autosold; everything else goes to the mall. A MALL or AUTO keep-count never sits under the worn
+// plus put-away copies. Review the generated rules in Philter Manager any time.
 //
 // Settings (KoLmafia preferences, set with: set tidy_protectAbove = 5000000):
 //   tidy_keepAbove      new item kinds priced at or above this each start as KEEP, whatever the count (unset = 10000; 0 = off)
@@ -51,7 +53,8 @@
 //                       worn plus put-away copies (keep_floor), the release of a hold respects the same floor, and the top-up
 //                       sends bag copies only. To sell a worn copy, unequip it first.
 //   tidy_priceFactor    multiply the market price by this when repricing (default 1.0 = match market;
-//                       0.99 = list 1% under the market price to get the sale first; never below 100 meat).
+//                       0.99 = list 1% under the market price to get the sale first). 0.5 to 1.0 only, or the run stops;
+//                       never below KoL's floor (100 meat, or twice the autosell value) or the rule's minimum price.
 //                       Applies only to listings above market: one already at or under market is never cut, because
 //                       the market figure counts your own units and cutting there would chase your own price down daily.
 //   tidy_priceJitter    random spread around the factor (default 0). 0.01 with factor 0.99 draws a factor
@@ -695,7 +698,7 @@ Decision decide(item it, int have, OCDinfo [item] bale, int [item] shop, boolean
 }
 
 // First run: no rule file yet. Write a rule for every inventory kind, sell nothing.
-void bootstrap_rules(boolean sim, string tag) {
+void bootstrap_rules(string tag) {
 	if (file_to_buffer(RULES_FILE).length() > 0)
 		abort(tag + "data/" + RULES_FILE + " exists but none of its lines parse as rules (tabs replaced by spaces? not the Philter"
 			+ " format?). Nothing overwritten. Fix the file, or rename it away and run again.");
@@ -970,8 +973,8 @@ void tidy_run(boolean sim);   // defined below; ASH needs to see it before tidy_
 
 // Write rules for closet items that have none, and turn KEEP rules on closet items into
 // CLST rules that keep today's inventory count on hand and file the rest back into the closet.
-// Items that grant a skill stay in the closet too. Returns how many rules were written.
-int closet_bootstrap(OCDinfo [item] rules, int [item] closet, string tag, boolean apply) {
+// Items that grant a skill stay in the closet too.
+void closet_bootstrap(OCDinfo [item] rules, int [item] closet, string tag, boolean apply) {
 	OCDinfo [item] bale = load_defaults();
 	cli_execute("refresh shop");
 	int [item] shop = get_shop();
@@ -1043,7 +1046,6 @@ int closet_bootstrap(OCDinfo [item] rules, int [item] closet, string tag, boolea
 			+ relowerNote + (apply ? "" : " when tidycloset go runs") + " (previous file saved as " + BACKUP_FILE + ")."
 			+ " Review them in Philter Manager before running tidycloset go.", "blue");
 	}
-	return added + converted;
 }
 
 // One-time (or occasional) closet liquidation: everything in the closet comes out,
@@ -1103,7 +1105,7 @@ void tidy_help() {
 	print_html("<font color='#1f6fb2'><b>tidy</b> - inventory cleanup on top of Philter. Nothing runs live without the word <b>go</b>.</font>");
 	h_section("Commands");
 	h_cmd("tidy", "preview: writes rules for new item kinds, shows what a live run would do, sells nothing (also: tidy sim)");
-	h_cmd("tidy go", "LIVE: new rules, store top-ups at your prices, daily reprice, then Philter");
+	h_cmd("tidy go", "LIVE: new rules, daily reprice, drip lots, store top-ups at your prices, then Philter");
 	h_cmd("tidycloset", "preview: rules for closet items that lack one, then a tally; moves nothing");
 	h_cmd("tidycloset go", "LIVE, one-off: empties the closet into inventory and runs the tidy pipeline");
 	h_cmd("tidy reset", "clean sweep: backs up your rule file, then writes fresh rules for every item kind in your inventory (sells nothing)");
@@ -1289,7 +1291,7 @@ void tidy_run(boolean sim) {
 	// ---- first run: write rules, sell nothing
 	OCDinfo [item] rules;
 	if (!file_to_map(RULES_FILE, rules) || count(rules) == 0) {
-		bootstrap_rules(sim, tag);   // stops if the file exists but nothing in it parses, before anything is copied over .prev
+		bootstrap_rules(tag);   // stops if the file exists but nothing in it parses, before anything is copied over .prev
 		if (!sim) return;
 		clear(rules);
 		file_to_map(RULES_FILE, rules);

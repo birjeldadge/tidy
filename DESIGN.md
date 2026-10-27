@@ -361,7 +361,14 @@ count to what is out of the closet for that run only. Since then the code
 has been reworked for readability after a clanmate's review (names spelled
 out, no long lines) with no change in behaviour, proven by running the old
 and new script side by side (see "What has been tested"); no upgrade step is
-needed for it.
+needed for it. A code audit on 2026-10-27 (prompted by a missing item that
+turned out not to be tidy's doing) led to six fixes, PRs #26 to #31: live runs
+refuse while Philter is set to kmail to a mall multi, buy stock or mall
+unruled items; new MALL and AUTO rules never sit under the worn-gear floor;
+Hagnk's copies count wherever closet copies do; a preview after the day's live
+reprice says so instead of listing cuts; the preview's top-up line shows the
+price after that day's reprice; and the closet run lowers a protected-gear
+count raised above the floor by hand. A `git update` is all an install needs.
 
 ## What has been tested
 
@@ -371,8 +378,10 @@ needed for it.
   `tidy go` (9 outfit pieces recovered, 328 listings repriced down, Philter
   listed 3.84M meat and autosold 191k, meat delta matched exactly), and a trader
   (7,187 kinds) whose preview and accident shaped most of the defaults above.
-- The live path (reprice, take-back, top-up, Philter live) has run once for
-  real through the public script. Drip listings have been preview-tested only.
+- The live path (reprice, take-back, top-up, Philter live) is the author's
+  daily run: his session logs show a live `tidy go` on 35 separate days
+  between 2026-09-12 and 2026-10-26. Drip has listed live too: 50 evil golden
+  arch at a time, four times between 2026-09-22 and 2026-10-19.
 - An adversarial review (a fresh reviewer with the repo, the KoLmafia source,
   and the brief "look for catastrophic failure and future footguns") produced
   six catastrophic and six recoverable findings. All twelve are fixed and each
@@ -521,6 +530,17 @@ needed for it.
   run on every script after each edit; it caught the one real slip (ASH
   identifiers are case-insensitive, so a variable named `decision` collided
   with the record type `Decision`).
+- Audit fixes (2026-10-27, PRs #26 to #31): each one passed mafia's `verify`,
+  run headless, and a preview A/B on the author's account under the test
+  suffix, with md5 checks of the real rule, hold, state, keep, drip and
+  drip-state files before and after. Where a fix changes a preview's output,
+  every changed line was checked. #30 changed exactly the 12 top-up lines of
+  items the preview also repriced, each at that item's own reprice target.
+  #29 was probed with today's reprice day staged in the test state file: 151
+  reprice lines became the one skip line, and nothing else changed. Two A/Bs
+  hit Philter's "uncategorized items" prompt on one side only, inside
+  Philter's own output, and came out byte-identical when both sides were
+  rerun back to back.
 
 ## Known limits
 
