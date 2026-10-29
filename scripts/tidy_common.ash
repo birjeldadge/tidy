@@ -60,14 +60,17 @@
 //   tidy_priceJitter    random spread around the factor (default 0). 0.01 with factor 0.99 draws a factor
 //                       between 0.98 and 1.00 per item per day; a listing already inside that band is left alone.
 //   tidy_dataFile       use OCDdata_<this>.txt instead of OCDdata_<your name>.txt (for people who keep one Philter file for several characters)
-//   tidy_rulesSuffix    testing only: use OCDdata_<name><suffix>.txt (and the matching keep/pin/drip/hold/state files) instead of your real ones
-// Names in the keep, pin and drip lists must be exact: the full item name (case does not matter, entity and plain forms
+//   tidy_rulesSuffix    testing only: use OCDdata_<name><suffix>.txt (and the matching keep/pin/junk/drip/hold/state files) instead of your real ones
+// Names in the keep, pin, junk and drip lists must be exact: the full item name (case does not matter, entity and plain forms
 // both count) or [id]name. A partial name is ignored with a message, because mafia's own lookup accepts any unique
 // substring and "cowbell" could quietly mean a different item than the one you meant.
 // Optional file data/tidy_keep_<name>.txt, one "item name<TAB>count" per line:
 //   those items always keep at least that many copies on hand (MALL/AUTO rules are patched).
 // Optional file data/tidy_pin_<name>.txt, one item name per line:
 //   those store listings are never repriced (hand-set prices, "keeping an eye on it" listings).
+// Optional file data/tidy_junk_<name>.txt, one item name per line:
+//   untradeables you want gone. A rule that sells, pulverizes or discards an untradeable item runs only if the item is
+//   on this list; any other such rule is listed in red by every run and treated as KEEP by the live run.
 // Optional file data/tidy_drip_<name>.txt, one "item name<TAB>count<TAB>days" per line (days optional):
 //   list that many only when your store holds none of it and it has been empty that many days; never
 //   top up while any are listed; the rest stays in inventory (tidy sets the rule's keep-count to match).
@@ -114,6 +117,9 @@ string RULES_FILE = "OCDdata_" + DATA_NAME + ".txt";
 string BACKUP_FILE = "OCDdata_" + DATA_NAME + ".prev.txt";
 string KEEP_FILE = "tidy_keep_" + DATA_NAME + ".txt";
 string PIN_FILE = "tidy_pin_" + DATA_NAME + ".txt";
+string JUNK_FILE = "tidy_junk_" + DATA_NAME + ".txt";
+// The copy of the rules a live run hands Philter when the untradeable guard holds rules back (see guarded_rules_copy).
+string GUARD_NAME = DATA_NAME + "_guarded";
 boolean IN_RESET = false;        // a reset's own preview must not count as "the user looked"
 boolean SNAPSHOT_TAKEN = false;  // .prev is written once per run, on the first write of the rule file
 boolean RULES_WRITTEN = false;   // whether this run wrote the rule file at all
@@ -215,21 +221,23 @@ item exact_item(string name, string listName) {
 		+ " Use the full name or [id]name.", "red");
 	return $item[none];
 }
-// Listings you never want repriced (data/tidy_pin_<name>.txt, one item name per line).
-boolean [item] load_pin_list() {
-	boolean [item] pins;
-	string text = file_to_buffer(PIN_FILE).to_string();
-	if (text.length() == 0) return pins;
+// A one-name-per-line list: the pin list (data/tidy_pin_<name>.txt, listings you never want repriced) and the junk
+// list (data/tidy_junk_<name>.txt, untradeables you want gone).
+boolean [item] load_item_list(string file, string listName) {
+	boolean [item] listed;
+	string text = file_to_buffer(file).to_string();
+	if (text.length() == 0) return listed;
 	foreach i, line in text.split_string("\n") {
 		string name = line;
 		if (name.ends_with("\r")) name = name.substring(0, name.length() - 1);
 		if (name.length() == 0 || name.starts_with("#")) continue;
-		item it = exact_item(name, "pin list");
-		if (it != $item[none]) pins[it] = true;
+		item it = exact_item(name, listName);
+		if (it != $item[none]) listed[it] = true;
 	}
-	return pins;
+	return listed;
 }
-boolean [item] PIN_LIST = load_pin_list();
+boolean [item] PIN_LIST = load_item_list(PIN_FILE, "pin list");
+boolean [item] JUNK_LIST = load_item_list(JUNK_FILE, "junk list");
 
 // Capped at 0.25: a band wider than a quarter of the price is a mispricing, not a spread.
 float price_jitter() {
@@ -937,10 +945,16 @@ void philter_sending_guard(boolean sim, string tag) {
 	else abort(tag + why + " Change the setting" + (count(found) == 1 ? " above" : "s above") + " and run again. Nothing was done.");
 }
 
+// Names tidy itself points Philter at: the rule file, with or without the test suffix, and the guarded copy a live run
+// may hand Philter. A run that stopped inside Philter leaves one of these behind; it is put back, not reported.
+boolean tidy_own_datafile(string name) {
+	return name == "" || name == BASE_NAME || name == DATA_NAME || name == BASE_NAME + "_guarded" || name == GUARD_NAME;
+}
+
 void common_guards(boolean sim, string tag) {
 	if (!sim && get_property("tidy_rulesSuffix") != "") abort(tag + "tidy_rulesSuffix is set to '" + get_property("tidy_rulesSuffix")
 		+ "', which points at a test rule file. Live runs are refused while it is set. Clear it with: set tidy_rulesSuffix =");
-	if (DATAFILE_BEFORE != "" && DATAFILE_BEFORE != BASE_NAME && DATAFILE_BEFORE != DATA_NAME)
+	if (!tidy_own_datafile(DATAFILE_BEFORE))
 		print(tag + "Philter's BaleOCD_DataFile is '" + DATAFILE_BEFORE + "', but tidy works on OCDdata_" + BASE_NAME + ".txt and points Philter"
 			+ " at that file only while Philter runs (then puts yours back). If '" + DATAFILE_BEFORE + "' is a test file left behind by a run"
 			+ " that stopped early, put Philter back with: zlib BaleOCD_DataFile = " + BASE_NAME + ". Only if it really is your own rule file:"
@@ -963,9 +977,9 @@ void common_guards(boolean sim, string tag) {
 // Philter is pointed at this character's rule file only for the moment it runs (see tidy_run), and back at the real file
 // afterwards, so a run under the test suffix never leaves Philter or its Manager looking at the test file.
 void restore_datafile(string tag) {
-	// back to whatever it was, exactly; only tidy's own name for this run (or nothing) becomes the base name. A test name a
-	// stopped run left behind is put back as found and reported by the notice in common_guards, never guessed at.
-	string back = (DATAFILE_BEFORE == "" || DATAFILE_BEFORE == DATA_NAME) ? BASE_NAME : DATAFILE_BEFORE;
+	// back to whatever it was, exactly; only tidy's own names (or nothing) become the base name. A test name a stopped
+	// run left behind is put back as found and reported by the notice in common_guards, never guessed at.
+	string back = tidy_own_datafile(DATAFILE_BEFORE) ? BASE_NAME : DATAFILE_BEFORE;
 	if (getvar("BaleOCD_DataFile") != back) set_philter_var("BaleOCD_DataFile", back, tag);
 }
 
@@ -1137,6 +1151,8 @@ void tidy_help() {
 	h_cmd(RULES_FILE, "your rules (edit in Philter Manager)");
 	h_cmd(KEEP_FILE, "item, tab, count: always keep that many on hand (" + count(KEEP_LIST) + " loaded)");
 	h_cmd(PIN_FILE, "one item per line: never reprice these listings (" + count(PIN_LIST) + " loaded)");
+	h_cmd(JUNK_FILE, "one item per line: untradeables a sell, pulverize or discard rule may get rid of; such a rule on any other"
+		+ " untradeable is listed in red and kept by tidy go (" + count(JUNK_LIST) + " loaded)");
 	h_cmd(DRIP_FILE, "item, tab, count, tab, days: small lots that run dry before relisting (" + count(DRIP_LIST) + " loaded)");
 	h_cmd(HOLD_FILE, "rules tidy wrote that are still on hold (tidy keeps this; leave it alone)");
 	h_cmd(STATE_FILE, "tidy's own records: last preview and its day, reprice day, closet-preview day, reset backup names,"
@@ -1283,6 +1299,59 @@ string action_note(string action) {
 	return "";
 }
 
+// The untradeable guard. KoL never lets an untradeable item be bought back, and the generator writes KEEP for every new
+// untradeable kind (decide), so a rule that gets rid of one (AUTO, MALL, PULV, DISC) was inherited or set by hand. Twice
+// such a leftover AUTO rule autosold a collection-log item (2026-09-22 and 2026-10-29). Every run lists these rules in
+// red; the live run hands Philter a copy of the rules with each one as KEEP. An item on the junk list
+// (data/tidy_junk_<name>.txt) is one you chose to be rid of: its rule runs as written.
+boolean gets_rid_of(string action) { return action == "AUTO" || action == "MALL" || action == "PULV" || action == "DISC"; }
+// The rules on untradeables that get rid of them: those off the junk list (junkListed false) or those on it (true).
+boolean [item] untradeable_riddance(OCDinfo [item] rules, boolean junkListed) {
+	boolean [item] found;
+	foreach it, rule in rules
+		if (it != $item[none] && !is_tradeable(it) && gets_rid_of(rule.action) && (JUNK_LIST contains it) == junkListed) found[it] = true;
+	return found;
+}
+// Prints nothing when every such rule is on the junk list (or there are none).
+void untradeable_warning(OCDinfo [item] rules, boolean sim, string tag) {
+	boolean [item] guarded = untradeable_riddance(rules, false);
+	int n = count(guarded);
+	if (n == 0) return;
+	print(tag + plural(n, "rule gets", "rules get") + " rid of an untradeable item, which can never be bought back:", "red");
+	foreach it in guarded {
+		int goes = max(0, on_hand(it) - rules[it].q);
+		print("  untradeable: " + on_hand(it) + " " + it + "  ->  " + rules[it].action + (rules[it].q > 0 ? " keep " + rules[it].q : "")
+			+ ", " + goes + " would go", "red");
+	}
+	int junked = count(untradeable_riddance(rules, true));
+	if (junked > 0) print(tag + plural(junked, "more untradeable rule is", "more untradeable rules are") + " on your junk list (data/"
+		+ JUNK_FILE + ") and " + (junked == 1 ? "runs" : "run") + " as written.", "olive");
+	string them = (n == 1) ? "it" : "them";
+	print(tag + (sim ? "tidy go treats " + them + " as KEEP and gets rid of none (the Philter simulation below still lists "
+		+ them + ")." : "this run treats " + them + " as KEEP: Philter gets rid of none.")
+		+ " To let one go, put its exact name on its own line in data/" + JUNK_FILE + "."
+		+ " To keep one for good, set its rule to KEEP in Philter Manager.", "red");
+}
+// For a live run: the name to point Philter at. With no guarded rules, the rule file itself. Otherwise a copy of the
+// rule file as it stands now (reprice and drip may have saved it) with each guarded rule as KEEP; the rule file is not
+// touched, so the warning stays until you decide.
+string guarded_rules_copy(string tag) {
+	OCDinfo [item] current; file_to_map(RULES_FILE, current);
+	boolean [item] guarded = untradeable_riddance(current, false);
+	if (count(guarded) == 0) return DATA_NAME;
+	buffer out;
+	foreach it, rule in current {
+		if (guarded contains it) out.append(rule_line(it, "KEEP", 0, "", "untradeable, not on the junk list (was " + rule.action + ")"));
+		else out.append(rule_line(it, rule.action, rule.q, rule.info, rule.message));
+	}
+	string copyFile = "OCDdata_" + GUARD_NAME + ".txt";
+	if (!buffer_to_file(out, copyFile)) abort(tag + "could not write " + copyFile + ", the copy of your rules that keeps the untradeables"
+		+ " listed above. Stopping before Philter: nothing of them was sold.");
+	print(tag + "Philter runs on data/" + copyFile + ", a copy of your rules with the " + plural(count(guarded), "untradeable rule", "untradeable rules")
+		+ " above as KEEP; " + RULES_FILE + " is unchanged.", "olive");
+	return GUARD_NAME;
+}
+
 void tidy_run(boolean sim) {
 	string tag = sim ? "tidy (preview): " : "tidy: ";
 	common_guards(sim, tag);
@@ -1345,6 +1414,7 @@ void tidy_run(boolean sim) {
 
 	print(tag + count(rules) + " rules on file, " + count(get_inventory()) + " item kinds in inventory, "
 		+ count(shop) + " listings in your store.", "blue");
+	untradeable_warning(rules, sim, tag);
 
 	// ---- keep one of every outfit piece and familiar equipment item (plus your keep list)
 	enforce_keep_one(rules, sim, tag);
@@ -1531,14 +1601,18 @@ void tidy_run(boolean sim) {
 	string simBefore = (vars contains "BaleOCD_Sim") ? vars["BaleOCD_Sim"] : "";
 	set_philter_var("BaleOCD_Sim", sim ? "true" : "false", tag);
 	if (sim && getvar("BaleOCD_Sim") != "true") abort(tag + "Philter is not in simulation mode. Stopping before anything is sold.");
-	// the rule file tidy works on (with the test suffix, if any), for this run only; put back right after
-	set_philter_var("BaleOCD_DataFile", DATA_NAME, tag);
+	// the rule file tidy works on (with the test suffix, if any), for this run only; put back right after. A live run with
+	// untradeable rules off the junk list uses the guarded copy instead.
+	string philterFile = sim ? DATA_NAME : guarded_rules_copy(tag);
+	set_philter_var("BaleOCD_DataFile", philterFile, tag);
 	int meatBefore = my_meat();
 	int kindsBefore = count(get_inventory());
 	print(tag + "running Philter " + (sim ? "in simulation" : "LIVE") + "...", sim ? "olive" : "red");
 	boolean philterOk = cli_execute("philter");
 	int kindsAfter = count(get_inventory());
 	restore_datafile(tag);
+	// emptied, not left as a second rule file that could drift from the real one
+	if (philterFile != DATA_NAME) { buffer blank; buffer_to_file(blank, "OCDdata_" + GUARD_NAME + ".txt"); }
 	if (!philterOk) print(tag + "Philter stopped early (see the lines above). Some rules may not have run.", "red");
 	if (simBefore != "" && simBefore != (sim ? "true" : "false")) set_philter_var("BaleOCD_Sim", simBefore, tag);
 	cli_execute("refresh shop");

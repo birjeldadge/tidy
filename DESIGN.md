@@ -38,7 +38,9 @@ each new item rather than a blanket answer.
 3. If the rule file predates tidy: a one-time notice with counts, including any
    CLAN, GIFT, PULV, DISP, MAKE, USE, UNTN or BREAK rules it inherited.
 4. CLAN, GIFT and DISC rules become KEEP (unless `tidy_allowGiving`), each one
-   printed.
+   printed. Then the untradeable warning: every AUTO, MALL, PULV or DISC rule on
+   an untradeable item that is not on the junk list, printed in red with the
+   copies on hand (see the safety model).
 5. Keep-count check: every MALL, AUTO or CLST rule is raised to its floor, the
    outfit, familiar-equipment or keep-list minimum, or the copies worn by you
    or any familiar plus the closet copies, whichever is higher (previews write
@@ -63,7 +65,9 @@ each new item rather than a blanket answer.
    after step 5, so there is nothing to fetch off you or a familiar, and if a
    rule somehow still sat below its floor the run would stop here.
 11. Philter, in simulation for a preview or live for `tidy go`, pointed at
-   tidy's rule file for that call only.
+   tidy's rule file for that call only. A live run with untradeable rules off
+   the junk list points it at a guarded copy instead (those rules as KEEP),
+   emptied afterwards.
 
 Every run that changes the rule file or the hold records keeps the versions it
 started from as `.prev` (one copy each), taken together on the first write of
@@ -142,6 +146,25 @@ sells nothing. tidy does not change them itself: they are the owner's settings,
 and changing them silently could hide an alt setup someone relies on. Philter can still pulverize,
 use, craft, untinker or display items if a rule the owner wrote says so; tidy
 itself only ever writes KEEP, MALL, AUTO and CLST.
+
+**An untradeable leaves only from the junk list.** KoL never lets an untradeable
+item be bought back, and the generator writes KEEP for every new untradeable
+kind, so an AUTO, MALL, PULV or DISC rule on one was inherited or set by hand.
+On the author's account 105 such AUTO rules were left over from a closet review
+on 2026-09-22, and one of them autosold a collection-log item (hand-carved
+staff, a Marty's-quest reward) that day and again on 2026-10-29; nothing in tidy
+had said so. Every run now prints those rules in red with the copies on hand,
+and a live run hands Philter a copy of the rule file with each one as KEEP, so
+the copies stay. The guard does not rewrite the rule file: an AUTO rule turned
+into KEEP would have to be set back by hand once its owner decided the item was
+junk after all, and the warning would go quiet with nothing decided. The opt-in
+is `data/tidy_junk_<name>.txt`, one name per line (the pin list's format and its
+exact-name check); a listed item's rule runs as written. The preview's Philter
+simulation runs on the real file and still lists those sales, which the warning
+says; making the simulation skip them too would have changed every preview
+beyond the warning. A run that stops inside Philter leaves Philter pointed at
+the copy; the next run treats that name as tidy's own and points Philter back
+at the real file.
 
 **Conservative generator.** The rule generator's defaults came out of two very
 different testers: a farmer with 1,500 item kinds and no old rules, and a mall
@@ -369,6 +392,12 @@ Hagnk's copies count wherever closet copies do; a preview after the day's live
 reprice says so instead of listing cuts; the preview's top-up line shows the
 price after that day's reprice; and the closet run lowers a protected-gear
 count raised above the floor by hand. A `git update` is all an install needs.
+
+**If you installed before 2026-10-29, `git update`.** A rule that autosold,
+malled, pulverized or discarded an untradeable item ran silently. It is now
+listed in red by every run and kept by `tidy go` unless the item is on the new
+junk list, `data/tidy_junk_<name>.txt`. If the warning lists items you do want
+gone, put their names on that list.
 
 ## What has been tested
 
