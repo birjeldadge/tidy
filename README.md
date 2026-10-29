@@ -216,10 +216,10 @@ Set these in the gCLI with `set name = value`.
 | `tidy_allowGiving` | false | While false, any CLAN, GIFT or DISC rule is turned into KEEP each run, so nothing goes to the clan stash, to another player, or into the void. |
 | `tidy_priceFactor` | 1.0 | Multiplies the market price when repricing and when pricing a fresh drip lot. Must be between 0.5 and 1.0; anything else stops the run, because a slipped digit like 0.01 would list everything at 1% of market. `0.99` lists 1% under it (10 meat on a 1,000-meat item, 10,000 on a 1,000,000-meat item) so you get the sale first. KoL's floor and the rule's minimum price still apply. Only a listing above market is cut; one already at or under market is left alone, because the market figure counts your own units and cutting there would chase your own price down 1% a day. |
 | `tidy_priceJitter` | 0 | Random spread around the factor, so your prices are not a fixed pattern a rival can read. `0.01` with factor `0.99` draws a factor between 0.98 and 1.00 per item per day. A listing already inside that band is left alone, so this does not churn your whole store daily. Capped at 0.25. |
-| `tidy_rulesSuffix` | (empty) | Testing only. Use `OCDdata_<name><suffix>.txt` (and the matching keep, pin, drip, hold and state files) instead of your real ones. Live runs are refused while it is set, and nothing a suffixed run records can arm the real holds. |
+| `tidy_rulesSuffix` | (empty) | Testing only. Use `OCDdata_<name><suffix>.txt` (and the matching keep, pin, junk, drip, hold and state files) instead of your real ones. Live runs are refused while it is set, and nothing a suffixed run records can arm the real holds. |
 | `tidy_dataFile` | (your name) | The Philter rule file tidy works on, `OCDdata_<this>.txt`. Set it if you keep one Philter file for several characters; tidy tells you when Philter's own setting points somewhere else. |
 
-Names in the keep, pin and drip lists must be exact: the full item name (any
+Names in the keep, pin, junk and drip lists must be exact: the full item name (any
 case; the `&eacute;` and plain forms both count) or `[id]name`. A partial name
 is ignored with a message, because mafia would otherwise match any unique
 substring and "cowbell" could quietly mean a different item.
@@ -237,6 +237,25 @@ peppermint parasol	1
 **Pin list.** Create `data/tidy_pin_<yourname>.txt` with one item name per
 line. Those listings are never repriced, whatever their price: hand-set prices,
 or items you keep in the mall just to watch the price.
+
+**Junk list (untradeables you want gone).** An untradeable item can never be
+bought back, and tidy writes KEEP for every new untradeable kind, so a rule
+that autosells, malls, pulverizes or discards one (AUTO, MALL, PULV, DISC) came
+from an old Philter file or from your own hand. Every run lists such rules in
+red, right after the "rules on file" line, one per item with what you have and
+how many would go. `tidy go` hands Philter a copy of your rules
+(`data/OCDdata_<name>_guarded.txt`, emptied after the run) with each one as KEEP,
+so none of those copies leave; your rule file is not changed, so the warning
+stays until you decide. The preview's Philter simulation still lists them. To let
+one go, create `data/tidy_junk_<yourname>.txt` with one item name per line, as in
+the pin list: its rule then runs as written, and the warning counts it in one
+line instead. To keep one for good, set its rule to KEEP in Philter Manager.
+Example:
+
+```
+stuffed angry cow
+club necklace
+```
 
 **Drip list (for sellers who care about the market, not just junk).** A
 listing that keeps refilling tells rivals you have depth, and they price against
