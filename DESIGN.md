@@ -38,9 +38,13 @@ each new item rather than a blanket answer.
 3. If the rule file predates tidy: a one-time notice with counts, including any
    CLAN, GIFT, PULV, DISP, MAKE, USE, UNTN or BREAK rules it inherited.
 4. CLAN, GIFT and DISC rules become KEEP (unless `tidy_allowGiving`), each one
-   printed. Then the untradeable warning: every AUTO, MALL, PULV or DISC rule on
-   an untradeable item that is not on the junk list, printed in red with the
-   copies on hand (see the safety model).
+   printed. Then the prices for the run: your own store goes on mafia's
+   `forbiddenStores` list, KoL's mall price API is read for all eighteen
+   categories (the five cheapest stores of every item, your store left out),
+   and the price records and the last `tidy_costFloorDays` days of purchases
+   are loaded (see pricing). Then the untradeable warning: every AUTO, MALL,
+   PULV or DISC rule on an untradeable item that is not on the junk list,
+   printed in red with the copies on hand (see the safety model).
 5. Keep-count check: every MALL, AUTO or CLST rule is raised to its floor, the
    outfit, familiar-equipment or keep-list minimum, or the copies worn by you
    or any familiar plus the closet copies, whichever is higher (previews write
@@ -53,7 +57,9 @@ each new item rather than a blanket answer.
    lists them, with what would sell.
 7. Rules for new item kinds, using the generator below; the MALL and AUTO ones
    go on hold, in a preview as much as in a live run.
-8. Daily reprice of the store (see pricing).
+8. Daily reprice of the store: down to the other sellers' price after a second
+   day under yours, back up toward the price you set once they have moved
+   above it (see pricing).
 9. Drip listings (see below).
 10. Top-ups: for MALL rules on items already in the store, the bag copies above
    the keep-count, counted the way Philter counts (bag + closet + Hagnk's +
@@ -67,7 +73,8 @@ each new item rather than a blanket answer.
 11. Philter, in simulation for a preview or live for `tidy go`, pointed at
    tidy's rule file for that call only. A live run with untradeable rules off
    the junk list points it at a guarded copy instead (those rules as KEEP),
-   emptied afterwards.
+   emptied afterwards. The run's last act takes your store off mafia's
+   forbidden list again.
 
 Every run that changes the rule file or the hold records keeps the versions it
 started from as `.prev` (one copy each), taken together on the first write of
@@ -205,41 +212,97 @@ and Philter stripped the worn copy to sell it. The 2026-10-27 audit found this. 
 
 KoLmafia deliberately hides the true cheapest listing from scripts: its mall
 search page is blocked for scripts and `mall_price()` returns the 5th-cheapest
-price, by design, to inhibit mallbots that snipe mispriced items. tidy uses that
-number and calls it "market". At factor 1.0 a listing sits at or above the
-cheapest sellers, so it never undercuts anyone and never starts a price war.
+unit's price, by design, to inhibit mallbots that snipe mispriced items. tidy
+uses that number and calls it "market". At factor 1.0 a listing sits at or
+above the other sellers, so it never undercuts anyone and never starts a price
+war.
 
-The 5th-cheapest figure counts units, not stores, and includes your own
-listing, so one seller dumping six cheap units for an afternoon can define
-"market" for a day. Two guards limit the damage: any cut is confirmed with a
-fresh search first (the cheap-listing cache is per session, not per day), and
-no listing is cut by more than `tidy_maxCutPct` (30%) in one day, so a real
-collapse is followed over several days and a fake one costs at most one step
-per day it persists.
+The first version followed that number down and never up. On 2026-11-04 a
+clanmate pointed out that the author was buying vitachoconutriment capsules
+from their store (CONSUME, at a high value of adventure) while selling his own
+for far less, and the review that followed found four faults, each verified
+against the mafia source and the author's session logs (the full report is
+`reports/markdown-review-2026-11-04.md`):
 
-Defaults: reprice **down only** (`tidy_reprice = down`), never raise a price
-the owner set, never chase a market that collapsed to KoL's floor (100 meat or
-twice the autosell value, whichever is higher; a price under it is a daily
-no-op), never below that floor or below the rule's own minimum price (Philter
-Manager's minimum column), never touch listings above `tidy_protectAbove`
-(1,000,000) or parked at 999,999,999+. `both` follows the market either way,
-under the same daily cap and with a fresh search before any change; `off`
-skips repricing. A preview uses the session's cached prices throughout, and
-never releases a hold, so repeated previews do not hammer the mall; the live
-run searches fresh, the release check included. The reprice day
-lives in `data/tidy_state_<name>.txt`, written before the first change: a
-preference would be per mafia install, and two installs on one synced data
-folder (a real layout) would each cut once. A preview reads the same record:
-once the day's live reprice has run, it says so and skips the step instead of
-listing cuts the next live run would not make (on 2026-10-26 an evening preview
-listed 40 such cuts; the 2026-10-27 audit caught it). `tidy_priceFactor` under
-1.0 lists under market for people who want the sale first, but only for a
-listing that sits above market: the market figure counts your own units, so
-when you are the cheapest seller it is your own price, and the second review
-showed a 0.99 factor cutting such a listing 1% a day forever; `tidy_priceJitter`
-draws a random factor inside a band per item per day so prices are not a fixed
-pattern a rival can read, and listings already inside the band are left alone
-so the store does not churn daily. A pin list exempts listings entirely.
+1. **A one-way ratchet.** Every dip in a thin market was followed down (up to
+   30% a day) and never back up, so over weeks every listing drifted to the
+   lowest point the market had touched. The capsule went 434,999 to 295,000 in
+   four cuts while a few sellers sat at 290k to 300k; by the time the market
+   was back at 440k the listing was still at 295,000, and 125 Red Pills cut to
+   82,500 had sold out while the 5th-cheapest was 240,000.
+2. **The market figure counted the owner's own listings.** mafia adds every
+   store's listing to the count, your own included (`MallSearchRequest`), so
+   once the ratchet had made a stack the cheapest, the "market" was that
+   stack's own price and nothing could tell tidy the other sellers were higher.
+   Live on the author's store, 15 capsules at 450,000 were the market figure
+   while the next seller asked 650,000. This is also why `both` could not have
+   recovered anything.
+3. **"Fresh search before any cut" never happened.** `mall_price(item, 0.0)`
+   returns mafia's session cache, which is seeded at login from the shared
+   price file (every entry stamped with the download time) and never expires
+   within the session; on 2026-11-01 three tidy runs made zero mall searches
+   between them. The docs and comments said otherwise.
+4. **No memory of the owner's price.** After one cut the cut price was "the
+   price you set", so "never raise a price you set" protected nothing and only
+   ever lost meat.
+
+What replaced it, in the order a run meets it:
+
+- **Your own store leaves the count.** Each run puts your player id on
+  mafia's `forbiddenStores` preference and takes it off at the end. mafia
+  leaves forbidden stores out of the 5th-cheapest calculation
+  (`MallPurchaseRequest.canPurchase`, `MallPriceManager.nthCheapestPrice`) and
+  never buys from your own store anyway, so nothing else changes. A run that
+  stops early leaves the id on until the next run.
+- **Every price is read fresh.** `mall_prices(category)` asks KoL's mall price
+  API (`api.php?what=mallprices`, in mafia since r29287) for the five cheapest
+  stores of every item in a category, and mafia rebuilds its market price for
+  each from that, forbidden stores left out. Eighteen categories cover the
+  mall at about a second each, so a preview can afford it too, and the preview
+  and the live run see the same figures. If a category cannot be read, the
+  preview says so and a live run reprices nothing that day. The 5th-cheapest
+  price is still the only market signal a script can see, and when your own
+  store was among the five returned stores the figure is the dearest of the
+  other units that came back, a lower bound on the true 5th.
+- **An anchor.** `data/tidy_price_<name>.txt` records, per listing, the price
+  you set, the price tidy last wrote, and the day the market was last seen
+  under your price. The anchor is adopted whenever a listing is not at the
+  price tidy last wrote: new to tidy, changed by hand, or listed afresh by
+  Philter. In `down` mode (the default) the target is the lower of the anchor
+  and the market times the factor: a listing is cut to the other sellers'
+  price and raised back toward your own as they move above it, never past it.
+  `both` lets a raise follow the market past the anchor, capped per day like
+  a cut. On an upgrade every listing is adopted at its current price, so
+  nothing is raised above where you have it today; the author seeded his file
+  from his logs with the prices each listing had before tidy ever cut it.
+- **Cuts wait a day, raises do not.** The first day the other sellers sit
+  under your price only marks the day; the cut comes on a later day if they
+  are still there. A raise is bounded by your own price, and a figure too high
+  only delays a sale, so it is made at once. The daily cap still applies to
+  cuts (and to `both` raises).
+- **Never below what you paid.** The last `tidy_costFloorDays` days of your
+  session logs (ASH `session_logs()`) give the most you paid for each item at
+  a mall store; no cut, no top-up and no drip lot goes below it. On Oct 8 the
+  first version had cut the capsule to 335,000 the day after the author paid
+  350,000 for one.
+- **Big stacks are never cut unattended.** `tidy_protectStack` (units times
+  price, default 5,000,000) skips the cut; a raise back toward your price is
+  still made.
+- **No churn.** `tidy_minMovePct` (default 1) drops a move smaller than that
+  share of the current price; the first version had cut one listing by one
+  meat a day for a fortnight.
+
+Defaults otherwise as before: never chase a market that collapsed to KoL's
+floor (100 meat or twice the autosell value), never below that floor or the
+rule's own minimum price, never touch listings above `tidy_protectAbove`
+(1,000,000) or parked at 999,999,999+, pinned listings exempt, the reprice day
+in `data/tidy_state_<name>.txt` written before the first change, a preview
+after the day's live reprice saying so instead of listing cuts the next live
+run would not make. `tidy_priceFactor` under 1.0 lists under the other
+sellers for people who want the sale first; a listing already at or under them
+is never cut, whatever the factor. `tidy_priceJitter` draws a random factor
+inside a band per item per day so prices are not a fixed pattern a rival can
+read, and listings already inside the band are left alone.
 
 ## Drip listings
 
@@ -281,7 +344,21 @@ the destructive step.
 ## Upgrade notes
 
 The review history, in order, with what each round changed for an installed
-user. Any install updated after 2026-09-11 has all of it.
+user. Any install updated after 2026-09-11 has all of it up to the pricing
+rework of 2026-11-04 below.
+
+**If you installed before 2026-11-04, `git update`, and expect a different
+reprice.** The daily markdown used to be down-only on a market figure that
+counted your own listings and was never freshly searched; it ratcheted
+listings down and left them there (see Pricing). It now reads KoL's mall price
+API every run with your own store left out, remembers the price you set,
+raises a listing back toward it as the market recovers, waits a second day
+before any cut, never goes below what you paid for the item lately, and never
+cuts a stack worth more than `tidy_protectStack`. Needs KoLmafia r29287. The
+first run after the update takes every listing's current price as yours, so
+nothing moves up on its own; a new file `data/tidy_price_<name>.txt` holds the
+records. `tidy_reprice = down` keeps its name with the new meaning; `both` and
+`off` are unchanged in spirit.
 
 **If you installed before 2026-09-10 evening, `git update`.** Earlier versions
 set Philter's simulation switch through a zlib command that silently does
@@ -312,7 +389,7 @@ checks for a preview before it empties the closet, and the store-price sanity
 check no longer trips on a listing parked at 999,999,999 meat. A third review
 found the count still missed equipment on benched familiars; fixed, and tidy
 now fetches such copies itself before topping up, so Philter cannot re-list
-them at market. Needs KoLmafia r27250 or newer from this version on. The same
+them at market. Needs KoLmafia r27250 or newer from this version on (r29287 since the 2026-11-04 pricing rework). The same
 review found that the hold released on the calendar alone, so a rule decided
 from one bad price sample could sell the next evening with nobody looking; a
 held rule now waits for a preview as well. Its smaller findings, fixed in the
@@ -403,6 +480,16 @@ gone, put their names on that list.
 
 - Compile and preview runs on the author's account under a test rule-file
   suffix, for every change.
+- The 2026-11-04 pricing rework: headless parse check, then three previews
+  under the test suffix on the author's store (1,564 listings): the old
+  script, the new script without price records, and the new script with the
+  records seeded from his logs. The new runs refreshed 6,840 prices in about
+  five seconds, found 180 item kinds bought in the last week, marked 218
+  listings as under the other sellers for a first day, cut nothing, and with
+  the seeded records proposed 8 raises back toward his prices; every line
+  outside the reprice step was identical to the old script's except the
+  top-up prices, which no longer show a same-day cut. The real files were
+  untouched and the forbidden-store entry came off at the end of each run.
 - Two clanmates as testers: a farmer (1,481 kinds) who completed the first live
   `tidy go` (9 outfit pieces recovered, 328 listings repriced down, Philter
   listed 3.84M meat and autosold 191k, meat delta matched exactly), and a trader
@@ -573,9 +660,9 @@ gone, put their names on that list.
 
 ## Known limits
 
-- Needs KoLmafia r27250 or newer (`equipped_amount(item, true)`, which counts
-  equipment on every familiar; git installs with a `manifest.json` root, which
-  is how Philter installs as a dependency, came earlier).
+- Needs KoLmafia r29287 or newer: `mall_prices(category)` reading KoL's mall
+  price API with mafia's forbidden-store list honoured. (`equipped_amount(item,
+  true)` and git installs with a `manifest.json` root are older.)
 - Philter's simulation is not free of side effects: when a rule's keep-count is
   below the number of copies you or your familiars are wearing, Philter's cleanup
   fetches them into your bag (off your familiars and off you) before it checks
@@ -624,10 +711,9 @@ gone, put their names on that list.
   sixgun cannot be met by an unequip; with mafia's `autoSatisfyWithMall` on
   (off by default) Philter would buy the copy. tidy's floor counts those
   items too, so its own rules never get there.
-- A release day costs one fresh mall search per released rule in the live run
-  (a preview uses the session cache), a rule that stays held by the price
-  check is searched again on each later live run, and a first run costs up to
-  one search per item kind; a big first-run release is a slow run.
+- Every run, previews included, starts with eighteen requests to KoL's mall
+  price API (about a second each); no per-item mall searches remain, so a big
+  release day or a first run costs no more than any other.
 - Philter also counts items installed in your campground; tidy does not.
   Nothing tidy writes rules for lives there in practice. Hagnk's storage used to
   be in the same position: Philter counts it (its `fullAmount` adds storage while
@@ -639,7 +725,24 @@ gone, put their names on that list.
   Hagnk's copies now count everywhere closet copies do.
 - Restoratives come from a snapshot of mafia's `restores.txt`; new restoratives
   need a line added.
-- The 5th-cheapest price is the only market signal a script can see.
+- The 5th-cheapest price is the only market signal a script can see. KoL's
+  price API returns five stores per item; when your own store is one of them
+  and is left out, the figure is the dearest of the other units that came
+  back, a lower bound on the true 5th-cheapest.
+- A run that stops early (an abort after the price refresh) leaves your own
+  store id on mafia's `forbiddenStores` preference until the next run strips
+  it; meanwhile the relay's mall search hides your store (mafia's
+  `showForbiddenStores`). mafia never buys from your own store, so nothing
+  else is affected.
+- `data/tidy_price_<name>.txt` is not covered by `tidy revert`: prices live in
+  the store, and the record only shapes future decisions. Delete a line to
+  have tidy take that listing's current price as yours.
+- The cost floor reads the `buy N item for P each from shop #` lines of your
+  session logs: mall purchases only, this character only, and only the days
+  whose logs are on this machine.
+- In `both` mode a raise past the anchor does not move the anchor; switching
+  back to `down` makes the old anchor the ceiling again, and a listing above
+  it is cut back only if the other sellers are also under it.
 - Nothing here knows about seasons. Crimbo stock is a KEEP rule you write.
 - A day is a UTC calendar day, in the hold and in the reprice record; for US
   evening players a new day starts at 7 or 8 pm. It is read once per run.
