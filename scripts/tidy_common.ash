@@ -19,14 +19,18 @@
 //      at the price you set, before Philter runs. Philter then finds nothing
 //      left to move for those items.
 //   3. Once a day, any listing priced at or under tidy_protectAbove
-//      (default 1,000,000 meat) that sits above KoLmafia's market price is
-//      lowered to it. That price skips the five cheapest units, so it never
-//      undercuts anyone. By default it never raises a price you set, never
-//      chases a market that collapsed to KoL's floor (100 meat or twice the
-//      autosell value), never goes below that floor or below the rule's own
-//      minimum price, and moves a listing at most tidy_maxCutPct a day.
-//      Listings above the threshold, or parked at 999,999,999+, are your
-//      hand-set prices and are left alone. No price duels.
+//      (default 1,000,000 meat) that sits above the market is lowered to it,
+//      and one tidy has lowered is raised back toward the price you set when
+//      the market recovers, never above it. "Market" is KoLmafia's figure, the
+//      5th-cheapest unit on sale, read fresh every run from KoL's mall price
+//      API with your own store left out of the count, so it never undercuts
+//      anyone and cannot mistake your own stack for the market. A cut waits
+//      until the market has sat under your price on two different days,
+//      moves at most tidy_maxCutPct a day, never goes below KoL's floor (100
+//      meat or twice the autosell value), the rule's own minimum price, or
+//      the most you paid for the item lately, and skips stacks worth more
+//      than tidy_protectStack. Listings above the threshold, or parked at
+//      999,999,999+, are your hand-set prices and are left alone. No price duels.
 //
 // Rule logic for new kinds (decide): untradeables, store and display-case items, Philter's default KEEPs, restoratives,
 // consumables (unless tidy_sellConsumables), gear and tools, and anything worth tidy_keepAbove or more per copy stay;
@@ -36,14 +40,21 @@
 //
 // Settings (KoLmafia preferences, set with: set tidy_protectAbove = 5000000):
 //   tidy_keepAbove      new item kinds priced at or above this each start as KEEP, whatever the count (unset = 10000; 0 = off)
-//   tidy_reprice        down (default: never raise a price, never chase a market that collapsed to the floor) | both (either
-//                       direction, same daily cap, fresh search before any change) | off
+//   tidy_reprice        down (default: follow the market down, and back up to the price you set, never above it) | both
+//                       (on up past your price too, capped per day) | off (never reprice)
 //   tidy_protectAbove   listings priced above this are never repriced (unset = 1000000; 0 = off, reprice everything)
 //   tidy_junkBelow      off (default): the lazyman rule. Set to e.g. 1000 and new item kinds with a mall price at or
 //                       below that and an autosell value start as AUTO, gear and consumables included. Protected classes still win.
 //   tidy_sellConsumables false (default): potions (usable, grants an effect), food, booze, spleen items with no rule start as KEEP
 //   tidy_allowGiving    false (default): rules that say CLAN (clan stash), GIFT (kmail) or DISC (discard) are turned into KEEP every run
 //   tidy_maxCutPct      30: the most the daily reprice may cut one listing in one day, as a percent of its current price
+//                       (and the most a "both" raise may add in a day); a cut also waits for a second day under your price
+//   tidy_protectStack   5000000: a listing whose units times price is above this is never cut (raising it back is still
+//                       allowed); 0 = off
+//   tidy_costFloorDays  7: a listing is never cut, and a drip lot never priced, below the most you paid for that item in
+//                       the last this-many days (read from your session logs); 0 = off
+//   tidy_minMovePct     1: a move smaller than this percent of the current price is not made, so prices do not churn
+//                       by a few meat a day; 0 = off
 //   tidy_holdNewDays    1: any run that writes a new MALL/AUTO rule (preview, first run, closet preview, live) holds it this
 //                       many days before it can sell (0 = off).
 //                       A held rule is released only after the wait AND after a preview has run to the end on a later day than
@@ -55,8 +66,7 @@
 //   tidy_priceFactor    multiply the market price by this when repricing (default 1.0 = match market;
 //                       0.99 = list 1% under the market price to get the sale first). 0.5 to 1.0 only, or the run stops;
 //                       never below KoL's floor (100 meat, or twice the autosell value) or the rule's minimum price.
-//                       Applies only to listings above market: one already at or under market is never cut, because
-//                       the market figure counts your own units and cutting there would chase your own price down daily.
+//                       A listing already at or under the other sellers is never cut, whatever the factor.
 //   tidy_priceJitter    random spread around the factor (default 0). 0.01 with factor 0.99 draws a factor
 //                       between 0.98 and 1.00 per item per day; a listing already inside that band is left alone.
 //   tidy_dataFile       use OCDdata_<this>.txt instead of OCDdata_<your name>.txt (for people who keep one Philter file for several characters)
@@ -76,12 +86,14 @@
 //   top up while any are listed; the rest stays in inventory (tidy sets the rule's keep-count to match).
 //   Rivals see a small stock that runs dry, not a deep one, so they price against you less.
 // State tidy keeps next to the rule file: data/tidy_hold_<name>.txt (rules tidy wrote that are still on hold: item,
-//   write day, decided keep-count, held keep-count, decision price) and data/tidy_state_<name>.txt (last preview and
-//   its day, reprice day, closet-preview day, reset backup names, whether the inherited-file notice was shown).
+//   write day, decided keep-count, held keep-count, decision price), data/tidy_price_<name>.txt (per listing: the price
+//   you set, the price tidy last wrote, the day the market was last seen under your price) and data/tidy_state_<name>.txt
+//   (last preview and its day, reprice day, closet-preview day, reset backup names, whether the inherited-file notice
+//   was shown).
 
-// equipped_amount(item, true) counts equipment on every familiar; also past r26597, where git checkout honours
-// manifest.json (Philter installs as a dependency).
-since r27250;
+// mall_prices(category) reads KoL's mall price API (the five cheapest stores of every item in a category, with mafia's
+// forbidden-store list honoured), which came in r29287; equipped_amount(item, true) and manifest.json git installs are older.
+since r29287;
 
 import "zlib.ash";
 
@@ -185,6 +197,24 @@ int max_cut_pct() {
 	if (pct < 1) pct = 1;
 	if (pct > 100) pct = 100;
 	return pct;
+}
+// A listing whose units times price is above this is never cut by the daily reprice (raising it back toward your price
+// is still allowed): a big stack is never marked down with nobody looking. Unset = 5,000,000. 0 = off.
+int protect_stack() {
+	int above = pref_int("tidy_protectStack", 5000000);
+	return above > 0 ? above : 0;
+}
+// The daily reprice never cuts a listing, and never prices a drip lot, below the most you paid for that item in the
+// last this-many days, read from your session logs. Unset = 7. 0 = off. Capped at 30 (a month of logs is plenty).
+int cost_floor_days() {
+	int days = pref_int("tidy_costFloorDays", 7);
+	return days > 30 ? 30 : days;
+}
+// A move smaller than this percent of the current price is not made, in either direction, so a listing does not churn
+// by a few meat a day. Unset = 1. 0 = off. Capped at 50.
+int min_move_pct() {
+	int pct = pref_int("tidy_minMovePct", 1);
+	return pct > 50 ? 50 : pct;
 }
 // New MALL/AUTO rules, whichever run writes them, are held for this many days (and until a later-day preview has
 // listed them) before they can sell, so a rule nobody has looked at never sells.
@@ -413,6 +443,120 @@ DripSpec [item] load_drip_list() {
 	return drips;
 }
 DripSpec [item] DRIP_LIST = load_drip_list();
+
+// What tidy knows about each listing's price (data/tidy_price_<name>.txt): item -> "<anchor> <last set> <below day>".
+// anchor: the price you set, the ceiling a raise may reach; it is adopted whenever a listing is not at the price tidy
+// last wrote, so a price you change by hand (or a fresh Philter listing) becomes the anchor. last set: the price tidy
+// last wrote to the store. below day: the UTC day the market was last seen under your price, 0 if it was not; a cut
+// needs two such days, so a one-day dip cannot move you.
+record PriceRec {
+	int anchor;
+	int lastSet;
+	int belowDay;
+};
+string PRICE_FILE = "tidy_price_" + DATA_NAME + ".txt";
+PriceRec [item] PRICES;
+boolean PRICES_CHANGED = false;
+void load_prices() {
+	clear(PRICES); PRICES_CHANGED = false;
+	string [item] raw;
+	file_to_map(PRICE_FILE, raw);
+	foreach it, line in raw {
+		if (it == $item[none]) continue;
+		string [int] fields = line.split_string(" ");
+		if (count(fields) != 3 || !plain_digits(fields[0]) || !plain_digits(fields[1]) || !plain_digits(fields[2])) {
+			print("tidy: the price record for " + it + " in data/" + PRICE_FILE + " is unreadable ('" + line
+				+ "'); the listing's current price is taken as yours.", "red");
+			continue;
+		}
+		PriceRec rec; rec.anchor = fields[0].to_int(); rec.lastSet = fields[1].to_int(); rec.belowDay = fields[2].to_int();
+		PRICES[it] = rec;
+	}
+}
+void save_prices(string tag) {
+	if (!PRICES_CHANGED) return;
+	string [item] raw;
+	foreach it, rec in PRICES raw[it] = rec.anchor + " " + rec.lastSet + " " + rec.belowDay;
+	if (!map_to_file(raw, PRICE_FILE))
+		print(tag + "warning: could not write " + PRICE_FILE + "; tidy may take today's prices as yours tomorrow.", "red");
+	PRICES_CHANGED = false;
+}
+// Forget a "market under your price" day once the market is back at or above it.
+void clear_below(item it) {
+	if ((PRICES contains it) && PRICES[it].belowDay != 0) { PRICES[it].belowDay = 0; PRICES_CHANGED = true; }
+}
+
+// The most you paid for each item in the last tidy_costFloorDays days, from mafia's session logs ("buy N item for P
+// each from shop #..."): a listing is never cut, and a drip lot never priced, below it. The direct guard against buying
+// an item at market and selling your own copies for less.
+int [item] PAID;
+int paid_most_so_far(item it) { return (PAID contains it) ? PAID[it] : 0; }
+void load_paid(string tag) {
+	clear(PAID);
+	int days = cost_floor_days();
+	if (days <= 0) return;
+	int buys = 0;
+	foreach i, text in session_logs(days) {
+		matcher m = create_matcher("(?m)^buy (\\d+) (.+?) for (\\d+) each from shop #", text);
+		while (m.find()) {
+			string name = m.group(2);
+			int price = m.group(3).to_int();
+			item it = name.to_item();
+			if (it == $item[none]) continue;
+			if (to_lower_case(it.name) != to_lower_case(name) && to_lower_case(entity_decode(it.name)) != to_lower_case(name)) continue;
+			if (price > paid_most_so_far(it)) PAID[it] = price;
+			buys += 1;
+		}
+	}
+	if (count(PAID) > 0) print(tag + "cost floor: " + count(PAID) + " item kinds bought in the last " + plural(days, "day", "days")
+		+ " (" + buys + " purchases); none is cut or drip-listed below the most you paid.", "blue");
+}
+int paid_most(item it) { return (PAID contains it) ? PAID[it] : 0; }
+
+// KoLmafia counts your own listings when it works out the market price (the 5th-cheapest unit on sale), so once your
+// stack is the cheapest, that price IS your price and nothing could tell you the other sellers are higher. mafia leaves
+// stores on its forbiddenStores preference out of that count (and never buys from your own store anyway), so each run
+// puts your own store id on the list while it works and takes it off at the end. A run that stops early leaves it on
+// until the next run, which only hides your store from the relay's mall search meanwhile (showForbiddenStores).
+string FORBIDDEN_BEFORE = "";
+string forbidden_without_me() {
+	string me = my_id(); buffer kept;
+	foreach i, id in get_property("forbiddenStores").split_string(",") {
+		if (id == "" || id == me) continue;
+		if (kept.length() > 0) kept.append(",");
+		kept.append(id);
+	}
+	return kept.to_string();
+}
+void forbid_own_store(string tag) {
+	FORBIDDEN_BEFORE = forbidden_without_me();
+	string withMe = (FORBIDDEN_BEFORE == "") ? my_id() : FORBIDDEN_BEFORE + "," + my_id();
+	set_property("forbiddenStores", withMe);
+	if (get_property("forbiddenStores") != withMe) abort(tag + "could not put your own store on mafia's forbiddenStores list,"
+		+ " so the market price would count your own listings. Nothing done.");
+}
+void unforbid_own_store() {
+	if (get_property("forbiddenStores") != FORBIDDEN_BEFORE) set_property("forbiddenStores", FORBIDDEN_BEFORE);
+}
+// KoL's mall price API gives the five cheapest stores of every item in a category in one request; mafia rebuilds its
+// market price for each item from that, forbidden stores left out. Eighteen categories cover the mall, about a second
+// each. Afterwards mall_price() and historical_price() are this minute's figures, for the reprice, the drip lots, the
+// hold release and the price a new rule is decided on alike. A category that returns nothing (KoL's API down, a fight
+// or choice in the way) leaves that part of the store on cached prices: the preview says so and a live run reprices
+// nothing that day.
+boolean PRICES_FRESH = false;
+void refresh_prices(string tag) {
+	int items = 0; string failed = "";
+	foreach cat in $strings[food, booze, othercon, weapons, hats, shirts, container, pants, acc, offhand, famequip, combat,
+		potions, hprestore, mprestore, familiars, mrstore, unlockers] {
+		int n = mall_prices(cat);
+		if (n > 0) items += n; else failed += (failed == "" ? "" : ", ") + cat;
+	}
+	PRICES_FRESH = (failed == "");
+	if (PRICES_FRESH) print(tag + "refreshed " + rnum(items) + " mall prices from KoL's price API (your own store left out of the market figure).", "blue");
+	else print(tag + "mall prices could not be refreshed for: " + failed + " (" + rnum(items) + " refreshed). Cached prices stand for the look;"
+		+ " a live run reprices nothing today.", "red");
+}
 
 int sale_price(item it) {
 	if (historical_age(it) < 1 && historical_price(it) > 0) return historical_price(it);
@@ -754,9 +898,10 @@ int rule_min_price(OCDinfo [item] rules, item it) {
 // The price a preview's reprice would set, per listing. A preview changes no price, so shop_price() still reads the old
 // one when the top-up line is printed further down, while the live run tops up after its reprice, at the new price.
 int [item] PREVIEW_PRICE;
-// Reprice every store listing to the current market price, once a day. The day is recorded in the state file next to
-// the rule file BEFORE the first change, so a run that stops halfway cannot cut the same listing twice, and neither can
-// two mafia installs that share one data folder (a preference would be per install).
+// Reprice every store listing once a day: down to the other sellers' price when a listing sits above it (and has for
+// two days running), and back up toward the price you set once they have moved above it again. The day is recorded in
+// the state file next to the rule file BEFORE the first change, so a run that stops halfway cannot cut the same listing
+// twice, and neither can two mafia installs that share one data folder (a preference would be per install).
 void reprice_store(OCDinfo [item] rules, boolean sim, string tag) {
 	string [string] state = load_state();
 	// A preview skips too once today's live reprice has run: listing cuts the live run will not make (it skips this step)
@@ -767,75 +912,113 @@ void reprice_store(OCDinfo [item] rules, boolean sim, string tag) {
 	}
 	string mode = reprice_mode();
 	if (mode == "off") { print(tag + "repricing is off (tidy_reprice = off); your prices are untouched.", "blue"); return; }
-	int limit = protect_above();
+	if (!PRICES_FRESH) {
+		print(tag + (sim ? "mall prices were not refreshed this run, so the lines below use cached prices; a live run would skip this step."
+			: "mall prices were not refreshed this run; nothing repriced today."), "red");
+		if (!sim) return;
+	}
+	int limit = protect_above(); int stackLimit = protect_stack(); int minMove = min_move_pct(); int cutPct = max_cut_pct();
 	float factor = price_factor();
 	int [item] shop = get_shop();
-	int changed = 0; int same = 0; int protectedCount = 0; int parked = 0; int noPrice = 0; int pinned = 0;
-	int wouldRaise = 0; int atFloor = 0; int atMarket = 0; int capped = 0; int atMin = 0; int failed = 0;
-	int cutPct = max_cut_pct();
+	int cut = 0; int raised = 0; int pending = 0; int same = 0; int protectedCount = 0; int parked = 0; int noPrice = 0; int pinned = 0;
+	int atFloor = 0; int atMarket = 0; int capped = 0; int atMin = 0; int atCost = 0; int guarded = 0; int failed = 0; int adopted = 0;
 	if (!sim) { state["repriceDay"] = RUN_DAY.to_string(); save_state(state, tag); }
 	foreach it, listed in shop {
 		if (PIN_LIST contains it) { pinned += 1; continue; }
 		int cur = shop_price(it);
 		if (cur >= 999999999) { parked += 1; continue; }   // the "not for sale" convention, whatever the protect threshold says
 		if (limit > 0 && cur > limit) { protectedCount += 1; continue; }
-		// A live run searches fresh where it matters (listings at 10,000+, or a stale cache); cheap listings use the cached
-		// price, or a big store means thousands of searches a day. A preview uses the cache throughout (one search per item
-		// per session), so repeated previews do not hammer the mall.
-		int mkt = (!sim && (cur >= 10000 || historical_age(it) >= 1.0)) ? mall_price(it, 0.0) : mall_price(it);
+		// the price you set: taken as the listing stands when tidy has no record of it, or when it is not at the price tidy
+		// last wrote (you changed it, or Philter listed it afresh)
+		if (!(PRICES contains it) || PRICES[it].lastSet != cur) {
+			PriceRec rec; rec.anchor = cur; rec.lastSet = cur; rec.belowDay = 0;
+			PRICES[it] = rec; PRICES_CHANGED = true; adopted += 1;
+		}
+		int mkt = mall_price(it);   // this run's refresh: the 5th-cheapest unit the other sellers offer
 		if (mkt <= 0) { noPrice += 1; continue; }
 		if (limit > 0 && mkt > limit) { protectedCount += 1; continue; }
-		// about to change a price on a cached number? confirm with a fresh search first (live runs only)
-		if (!sim && mkt != cur && cur < 10000 && historical_age(it) < 1.0) {
-			mkt = mall_price(it, 0.0);
-			if (mkt <= 0) { noPrice += 1; continue; }
-			if (limit > 0 && mkt > limit) { protectedCount += 1; continue; }
+		int anchor = PRICES[it].anchor;
+		int target = target_price(it, mkt);                       // the market times the factor (and jitter), never under KoL's floor
+		if (mode == "down" && target > anchor) target = anchor;   // a raise stops at the price you set
+		// inside the allowed band already, or nothing to change: leave it (with jitter 0 the band is a single price)
+		if (target == cur || (cur >= band_low(it, mkt) && cur <= band_high(it, mkt))) { same += 1; clear_below(it); continue; }
+		if (target > cur) {
+			// a raise: back toward the price you set (down), or on up with the market (both). A figure too high only delays a
+			// sale, and in down mode your own price caps it, so a raise does not wait a second day; in both mode it is capped per day.
+			if (mode == "both") { int ceilToday = cur + (cur * cutPct / 100); if (target > ceilToday) { target = ceilToday; capped += 1; } }
+			if ((target - cur) * 100 < cur * minMove) { same += 1; clear_below(it); continue; }   // under tidy_minMovePct
+			clear_below(it);
+			string why = (mode == "both") ? " (the market is at " + rnum(mkt) + ")"
+				: (target == anchor ? " (back to your price; the other sellers are at " + rnum(mkt) + ")"
+					: " (toward your price of " + rnum(anchor) + "; the other sellers are at " + rnum(mkt) + ")");
+			raised += 1;
+			if (sim) { print("  would raise " + listed + " " + it + ": " + rnum(cur) + " -> " + rnum(target) + why, "black"); PREVIEW_PRICE[it] = target; }
+			else if (reprice_shop(target, shop_limit(it), it)) {
+				print("  raised " + listed + " " + it + ": " + rnum(cur) + " -> " + rnum(target) + why, "black");
+				PRICES[it].lastSet = target; PRICES_CHANGED = true;
+			}
+			else { failed += 1; print(tag + "could not reprice " + it + "; left at " + rnum(cur) + ".", "red"); }
+			continue;
 		}
-		// inside the allowed band already: leave it (with jitter 0 the band is a single price)
-		if (cur >= band_low(it, mkt) && cur <= band_high(it, mkt)) { same += 1; continue; }
+		// a cut. Never when the listing already sits at or under the other sellers: a factor under 1.0 would otherwise chase
+		// you down by that much every day.
+		if (cur <= mkt) { atMarket += 1; clear_below(it); continue; }
 		if (mode == "down" && mkt <= mall_floor(it)) { atFloor += 1; continue; }   // market collapsed to the floor: not worth chasing
-		int newPrice = target_price(it, mkt);
-		if (newPrice == cur) { same += 1; continue; }
-		if (mode == "down" && newPrice > cur) { wouldRaise += 1; continue; }   // never raise a price you set
-		// Never cut a listing that is already at or under market. The market figure counts your own units, so when
-		// you are the cheapest seller it IS your price, and a factor under 1.0 would cut you under yourself every day.
-		if (newPrice < cur && cur <= mkt) { atMarket += 1; continue; }
+		if (stackLimit > 0 && cur * listed > stackLimit) { guarded += 1; continue; }   // a big stack is never marked down unattended
+		int wanted = target; string held = "";
 		int minPrice = rule_min_price(rules, it);   // the rule's own minimum price is never undercut
-		if (newPrice < minPrice) { newPrice = minPrice; atMin += 1; }
-		int floorPrice = mall_floor(it);
-		// no more than tidy_maxCutPct off in one day, and no more than that up in one day ("both" mode): a troll listing, or a
-		// rule minimum far above the listing, cannot move you 900k in one step
-		int floorToday = cur - (cur * cutPct / 100);
-		int ceilToday = cur + (cur * cutPct / 100);
-		if (newPrice < floorToday) { newPrice = floorToday < floorPrice ? floorPrice : floorToday; capped += 1; }
-		if (newPrice > ceilToday) { newPrice = ceilToday; capped += 1; }
-		if (newPrice == cur || (mode == "down" && newPrice > cur)) { same += 1; continue; }
-		changed += 1;
-		if (sim) {
-			print("  would reprice " + listed + " " + it + ": " + rnum(cur) + " -> " + rnum(newPrice), "black");
-			PREVIEW_PRICE[it] = newPrice;
+		if (wanted < minPrice) { wanted = minPrice; held = "min"; }
+		int paidMost = paid_most(it);               // nor the most you paid for the item lately
+		if (wanted < paidMost) { wanted = paidMost; held = "cost"; }
+		if (wanted >= cur) {
+			if (held == "cost") atCost += 1; else if (held == "min") atMin += 1; else same += 1;
+			clear_below(it); continue;
 		}
-		else if (reprice_shop(newPrice, shop_limit(it), it))
-			print("  repriced " + listed + " " + it + ": " + rnum(cur) + " -> " + rnum(newPrice), "black");
+		int floorPrice = mall_floor(it);
+		// no more than tidy_maxCutPct off in one day: a troll listing cannot move you 900k in one step
+		int floorToday = cur - (cur * cutPct / 100);
+		if (wanted < floorToday) { wanted = floorToday < floorPrice ? floorPrice : floorToday; capped += 1; }
+		if ((cur - wanted) * 100 < cur * minMove) { same += 1; clear_below(it); continue; }   // under tidy_minMovePct
+		// two days running: the first day the market is seen under your price only marks the day. A preview marks it too,
+		// and a live run on the same day reads that as today, so the cut comes on a later day either way.
+		if (PRICES[it].belowDay == 0 || PRICES[it].belowDay >= RUN_DAY) {
+			if (PRICES[it].belowDay == 0) { PRICES[it].belowDay = RUN_DAY; PRICES_CHANGED = true; }
+			pending += 1;
+			print("  under your price today: " + listed + " " + it + " at " + rnum(cur) + ", the other sellers at " + rnum(mkt)
+				+ "; cut to " + rnum(wanted) + " on a later day if they stay there", "olive");
+			continue;
+		}
+		cut += 1;
+		if (held == "cost") atCost += 1; else if (held == "min") atMin += 1;
+		if (sim) { print("  would reprice " + listed + " " + it + ": " + rnum(cur) + " -> " + rnum(wanted), "black"); PREVIEW_PRICE[it] = wanted; }
+		else if (reprice_shop(wanted, shop_limit(it), it)) {
+			print("  repriced " + listed + " " + it + ": " + rnum(cur) + " -> " + rnum(wanted), "black");
+			PRICES[it].lastSet = wanted; PRICES[it].belowDay = 0; PRICES_CHANGED = true;
+		}
 		else { failed += 1; print(tag + "could not reprice " + it + "; left at " + rnum(cur) + ".", "red"); }
 	}
+	save_prices(tag);   // before any stop below, so the prices tidy did write are on record
 	if (failed > 0) abort(tag + plural(failed, "reprice", "reprices") + " failed; mafia may be in an error state."
 		+ " Stopping before Philter. Run 'refresh all' and try again.");
 	if (capped > 0) print(tag + plural(capped, "change", "changes") + " limited to " + cutPct + "% today (tidy_maxCutPct);"
 		+ " the rest of the way comes on later days if the market stays there.", "blue");
 	if (atMin > 0) print(tag + plural(atMin, "listing", "listings")
 		+ " held at the rule's own minimum price (Philter Manager's minimum column).", "blue");
+	if (atCost > 0) print(tag + plural(atCost, "listing", "listings") + " held at the most you paid for the item in the last "
+		+ plural(cost_floor_days(), "day", "days") + " (tidy_costFloorDays).", "blue");
 	string how = (factor < 1.0 || price_jitter() > 0.0)
 		? " (factor " + factor + (price_jitter() > 0.0 ? " +/- " + price_jitter() : "") + ")" : "";
 	string leftAlone = (limit > 0) ? "over " + rnum(limit) + " meat" : "protect threshold off";
-	print(tag + (sim ? "would reprice " : "repriced ") + plural(changed, "listing", "listings") + " to market" + how + "; "
-		+ same + " already there; " + protectedCount + " left alone (" + leftAlone + "); " + parked + " parked at 999,999,999+; "
+	string stacks = (stackLimit > 0) ? guarded + " stacks worth over " + rnum(stackLimit) + " left alone (tidy_protectStack); " : "";
+	print(tag + (sim ? "would cut " : "cut ") + plural(cut, "listing", "listings") + " to the other sellers' price" + how + " and "
+		+ (sim ? "raise " : "raised ") + raised + (mode == "both" ? " with the market; " : " back toward your prices; ") + pending + " under your price for the first day; "
+		+ same + " already there; " + stacks + protectedCount + " left alone (" + leftAlone + "); " + parked + " parked at 999,999,999+; "
 		+ pinned + " pinned; " + noPrice + " with no market price.", "blue");
-	if (mode == "down" && (wouldRaise > 0 || atFloor > 0))
-		print(tag + wouldRaise + " below market and left there (tidy never raises your prices); " + atFloor
-			+ " with a market at KoL's floor, not chased. Set tidy_reprice = both to change that.", "blue");
-	if (atMarket > 0) print(tag + atMarket + " already at or under market and left there (a price factor only applies to listings"
-		+ " above market, so you never chase your own price down).", "blue");
+	if (mode == "down" && atFloor > 0)
+		print(tag + atFloor + " with a market at KoL's floor, not chased. Set tidy_reprice = both to change that.", "blue");
+	if (atMarket > 0) print(tag + atMarket + " already at or under the other sellers and left there.", "blue");
+	if (adopted > 0) print(tag + adopted + " listings' prices taken as yours (new to tidy, or changed since tidy last set them)"
+		+ " and recorded in data/" + PRICE_FILE + ".", "blue");
 }
 
 // Drip listings: list a fixed count only when the store holds none (and it has been empty long
@@ -871,10 +1054,10 @@ void drip_step(OCDinfo [item] rules, int [item] shop, boolean sim, string tag) {
 				print("  drip: " + it + " empty for " + emptyDays + " of " + spec.days + " days; not relisting yet", "black");
 			}
 			else {
-				int mkt = sim ? mall_price(it) : mall_price(it, 0.0);
+				int mkt = mall_price(it);   // this run's refresh
 				if (mkt <= 0) print(tag + "drip: no market price for " + it + "; not listed.", "red");
 				else {
-					int price = max(target_price(it, mkt), rule_min_price(rules, it));
+					int price = max(target_price(it, mkt), max(rule_min_price(rules, it), paid_most(it)));   // never under the rule's minimum, or the most you paid lately
 					// never below your keep list / outfit minimum
 					int lot = min(spec.n, min(item_amount(it), on_hand(it) - protect_min(it, pieces)));
 					if (lot <= 0) print("  drip: " + it + " not listed; all copies on hand are inside your keep-list or outfit minimum", "olive");
@@ -1130,12 +1313,18 @@ void tidy_help() {
 	h_cmd("tidy_keepAbove", pref_text("tidy_keepAbove", "10000")
 		+ " - new item kinds worth this much each start as KEEP, whatever the count (0 = off)");
 	h_cmd("tidy_reprice", reprice_mode()
-		+ " - down = never raise, never chase a floor; both = follow market either way; off = never reprice");
+		+ " - down = follow the market down, and back up to the price you set; both = on up past your price too; off = never reprice");
 	h_cmd("tidy_protectAbove", pref_text("tidy_protectAbove", "1000000") + " - listings priced above this are never repriced (0 = off)");
 	h_cmd("tidy_priceFactor", price_factor() + " - multiply the market price when repricing (1.0 = match, 0.99 = 1% under)");
 	h_cmd("tidy_priceJitter", price_jitter() + " - random spread around the factor, per item per day (0 = off)");
 	h_cmd("tidy_maxCutPct", pref_text("tidy_maxCutPct", "30")
-		+ "% - the most one listing may be cut in one day; the rest comes on later days if the market stays down");
+		+ "% - the most one listing may be cut in one day (a cut also waits for a second day under your price); the rest comes on later days");
+	h_cmd("tidy_protectStack", pref_text("tidy_protectStack", "5000000")
+		+ " - a listing whose units times price is above this is never cut; raising it back toward your price still happens (0 = off)");
+	h_cmd("tidy_costFloorDays", pref_text("tidy_costFloorDays", "7")
+		+ " - a listing is never cut, and a drip lot never priced, below the most you paid for the item in the last this-many days (0 = off)");
+	h_cmd("tidy_minMovePct", pref_text("tidy_minMovePct", "1")
+		+ "% - a move smaller than this is not made, so prices do not churn by a few meat a day (0 = off)");
 	h_cmd("tidy_holdNewDays", pref_text("tidy_holdNewDays", "1")
 		+ " - rules tidy writes for new item kinds (in any run) are held this many days, and until a later-day preview has listed them (0 = off)");
 	h_cmd("tidy_junkBelow", pref_text("tidy_junkBelow", "off")
@@ -1155,6 +1344,8 @@ void tidy_help() {
 		+ " untradeable is listed in red and kept by tidy go (" + count(JUNK_LIST) + " loaded)");
 	h_cmd(DRIP_FILE, "item, tab, count, tab, days: small lots that run dry before relisting (" + count(DRIP_LIST) + " loaded)");
 	h_cmd(HOLD_FILE, "rules tidy wrote that are still on hold (tidy keeps this; leave it alone)");
+	h_cmd(PRICE_FILE, "per listing: the price you set, the price tidy last wrote, the day the market was last seen under yours"
+		+ " (tidy keeps this; delete a line to have tidy take that listing's current price as yours)");
 	h_cmd(STATE_FILE, "tidy's own records: last preview and its day, reprice day, closet-preview day, reset backup names,"
 		+ " inherited-file notice (tidy keeps this)");
 	h_cmd(DRIP_STATE_FILE, "the day each drip listing was first seen empty (tidy keeps this)");
@@ -1411,6 +1602,11 @@ void tidy_run(boolean sim) {
 	// return value would clear that state and let the run continue on a stale store list.)
 	cli_execute("refresh shop");
 	int [item] shop = get_shop();
+	// the market figures every step below works from: your own store left out of the count, every category read fresh
+	forbid_own_store(tag);
+	refresh_prices(tag);
+	load_prices();
+	load_paid(tag);
 
 	print(tag + count(rules) + " rules on file, " + count(get_inventory()) + " item kinds in inventory, "
 		+ count(shop) + " listings in your store.", "blue");
@@ -1461,14 +1657,14 @@ void tidy_run(boolean sim) {
 		int keepQ = max(decidedQ, keep_floor(it, pieces));
 		boolean due = RUN_DAY - since >= holdDays;
 		boolean seen = previewDay > since;
-		// only a live run releases: a preview lists the rule and leaves the record, so the fresh search below always
-		// precedes the sale
+		// only a live run releases: a preview lists the rule and leaves the record, so the price check below, against this
+		// run's freshly read market, always precedes the sale
 		if (due && seen && !sim) {
-			// one fresh search before the sale: the decision came from a cached (possibly shared, possibly gamed) price.
+			// one fresh look before the sale (this run's price refresh): the decision came from an earlier day's price.
 			// Held again only if the market has left the band the decision was made in: an AUTO decision now worth more
 			// than twice the floor and more than the lazyman number, a MALL decision whose price has at least doubled and
 			// crossed tidy_keepAbove, or nothing listed at all (a fresh check is impossible, and unlisted can mean rare).
-			int fresh = mall_price(it, 0.0);
+			int fresh = mall_price(it);
 			string why = "";
 			if (fresh <= 0) why = "nothing is listed in the mall right now, so the price cannot be checked";
 			else if (rules[it].action == "AUTO" && fresh > max(2 * mall_floor(it), junk_below()))
@@ -1622,4 +1818,5 @@ void tidy_run(boolean sim) {
 	if (!sim && philterOk) { state_set("resetBackup", "", tag); state_set("resetHoldBackup", "", tag); }
 	print(tag + "finished. Inventory " + kindsBefore + " kinds -> " + kindsAfter + " kinds; meat " + rnum(meatBefore) + " -> " + rnum(my_meat())
 		+ "; store now has " + count(get_shop()) + " listings.", "blue");
+	unforbid_own_store();
 }
