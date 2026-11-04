@@ -977,7 +977,8 @@ void reprice_store(OCDinfo [item] rules, boolean sim, string tag) {
 		int floorPrice = mall_floor(it);
 		// no more than tidy_maxCutPct off in one day: a troll listing cannot move you 900k in one step
 		int floorToday = cur - (cur * cutPct / 100);
-		if (wanted < floorToday) { wanted = floorToday < floorPrice ? floorPrice : floorToday; capped += 1; }
+		boolean cappedNow = false;
+		if (wanted < floorToday) { wanted = floorToday < floorPrice ? floorPrice : floorToday; cappedNow = true; }
 		if ((cur - wanted) * 100 < cur * minMove) { same += 1; clear_below(it); continue; }   // under tidy_minMovePct
 		// two days running: the first day the market is seen under your price only marks the day. A preview marks it too,
 		// and a live run on the same day reads that as today, so the cut comes on a later day either way.
@@ -989,6 +990,7 @@ void reprice_store(OCDinfo [item] rules, boolean sim, string tag) {
 			continue;
 		}
 		cut += 1;
+		if (cappedNow) capped += 1;   // counted only for a cut that is made: a first-day mark is not a change
 		if (held == "cost") atCost += 1; else if (held == "min") atMin += 1;
 		if (sim) { print("  would reprice " + listed + " " + it + ": " + rnum(cur) + " -> " + rnum(wanted), "black"); PREVIEW_PRICE[it] = wanted; }
 		else if (reprice_shop(wanted, shop_limit(it), it)) {
